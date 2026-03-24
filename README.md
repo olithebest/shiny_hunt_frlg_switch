@@ -63,7 +63,7 @@ Nintendo Switch  ← receives button presses (A, soft-reset combo, etc.)
 
 ### 1 — Clone this repository
 ```bash
-git clone https://github.com/YOUR_USERNAME/shiny_hunt_frlg_switch.git
+git clone https://github.com/olithebest/shiny_hunt_frlg_switch.git
 cd shiny_hunt_frlg_switch
 ```
 
