@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+.venv
+env/
+venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.DS_Store
+Thumbs.db
+*.log
+logs/
+config/settings_local.yaml

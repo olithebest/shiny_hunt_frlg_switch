@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  shiny-hunter:
+    build: .
+    container_name: shiny-hunter-frlg
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./config:/app/config      # persist your settings
+      - ./logs:/app/logs          # persist logs
+    environment:
+      - STREAMLIT_SERVER_HEADLESS=true
+    # NOTE: USB passthrough (capture card + Arduino serial) only works on Linux.
+    # Windows/Mac users: run natively with start.bat instead of Docker.
+    # Uncomment and adjust the device lines below if running on Linux:
+    # devices:
+    #   - /dev/video0:/dev/video0    # capture card
+    #   - /dev/ttyUSB0:/dev/ttyUSB0  # Arduino serial
+    restart: unless-stopped

@@ -1,0 +1,22 @@
+capture:
+  device_index: 0      # Try 0, 1, 2 depending on how many cameras are connected
+  width: 1280
+  height: 720
+  fps: 30
+
+controller:
+  mode: "keyboard"     # "keyboard" (test) or "serial" (Arduino)
+  serial_port: "COM3"  # Windows: COM3/COM4 | Linux: /dev/ttyUSB0
+  baud_rate: 9600
+
+detection:
+  sparkle_threshold: 50         # Minimum sparkle pixels to call shiny
+  sparkle_window_duration: 2.0  # Seconds to watch for sparkle after Pokemon appears
+  frames_per_second: 10         # Frame capture rate during sparkle window
+
+timing:
+  soft_reset_wait: 5.0       # Wait (s) after soft reset before pressing A
+  title_screen_wait: 3.0     # Wait (s) on title screen before pressing A to continue
+  continue_game_wait: 6.0    # Wait (s) for overworld to load after Continue
+  battle_start_wait: 3.5     # Wait (s) for battle intro transition to finish
+  sparkle_window_start: 0.5  # Wait (s) after battle loads before capturing frames
