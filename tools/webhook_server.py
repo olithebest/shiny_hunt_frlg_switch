@@ -24,10 +24,9 @@ Edit TITLE_TO_HUNT below to match your exact itch.io page titles.
 import os
 import sys
 import json
-import smtplib
 import logging
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import urllib.request
+import urllib.error
 from datetime import date
 from pathlib import Path
 
@@ -47,8 +46,8 @@ from src.licensing.license_manager import generate_key, HUNT_CATALOGUE
 # ---------------------------------------------------------------------------
 # Config — all sensitive values come from environment variables / .env file
 # ---------------------------------------------------------------------------
-GMAIL_ADDRESS  = os.environ.get("GMAIL_ADDRESS", "")   # your Gmail address
-GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASSWORD", "").replace(" ", "")  # Gmail App Password (spaces stripped)
+RESEND_API_KEY  = os.environ.get("RESEND_API_KEY", "")   # from resend.com — free, no SMTP needed
+FROM_EMAIL      = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")  # use resend.dev until you verify a domain
 WEBHOOK_SECRET = os.environ.get("ITCH_WEBHOOK_SECRET", "")  # optional: itch.io webhook secret for verification
 
 # ---------------------------------------------------------------------------
@@ -96,58 +95,41 @@ Happy hunting!
 """
 
 
-def send_key_email(to_email: str, product_title: str, hunt_id: str, key: str) -> bool:
-    """Send the license key to the buyer via Gmail SMTP."""
-    if not GMAIL_ADDRESS or not GMAIL_APP_PASS:
-        log.error("GMAIL_ADDRESS or GMAIL_APP_PASSWORD not set — cannot send email")
-        return False
+def send_key_email(to_email: str, product_title: str, hunt_id: str, key: str):
+    """Send the license key via Resend HTTPS API (no SMTP — works on Render free tier)."""
+    if not RESEND_API_KEY:
+        return False, "RESEND_API_KEY not set"
 
     pokemon = HUNT_CATALOGUE.get(hunt_id, {}).get("display", hunt_id)
+    body    = EMAIL_TEMPLATE.format(product_title=product_title, key=key, pokemon=pokemon)
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"Your license key for {product_title}"
-    msg["From"]    = f"Shiny Hunter <{GMAIL_ADDRESS}>"
-    msg["To"]      = to_email
+    payload = json.dumps({
+        "from":    f"Shiny Hunter <{FROM_EMAIL}>",
+        "to":      [to_email],
+        "subject": f"Your license key for {product_title}",
+        "text":    body,
+    }).encode()
 
-    body = EMAIL_TEMPLATE.format(
-        product_title=product_title,
-        key=key,
-        pokemon=pokemon,
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type":  "application/json",
+        },
+        method="POST",
     )
-    msg.attach(MIMEText(body, "plain"))
-
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as server:
-            server.login(GMAIL_ADDRESS, GMAIL_APP_PASS)
-            server.sendmail(GMAIL_ADDRESS, to_email, msg.as_string())
-        log.info(f"Key emailed to {to_email} for {hunt_id}")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+        log.info(f"Key emailed via Resend to {to_email} for {hunt_id}: {result}")
         return True, None
+    except urllib.error.HTTPError as exc:
+        body_err = exc.read().decode(errors="replace")
+        log.error(f"Resend API error {exc.code}: {body_err}")
+        return False, f"Resend {exc.code}: {body_err}"
     except Exception as exc:
         log.error(f"Failed to send email to {to_email}: {exc}")
-        return False, str(exc)
-
-
-def send_key_email_starttls(to_email: str, product_title: str, hunt_id: str, key: str):
-    """Fallback: try port 587 with STARTTLS if port 465 is blocked."""
-    if not GMAIL_ADDRESS or not GMAIL_APP_PASS:
-        return False, "credentials not set"
-    pokemon = HUNT_CATALOGUE.get(hunt_id, {}).get("display", hunt_id)
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"Your license key for {product_title}"
-    msg["From"]    = f"Shiny Hunter <{GMAIL_ADDRESS}>"
-    msg["To"]      = to_email
-    body = EMAIL_TEMPLATE.format(product_title=product_title, key=key, pokemon=pokemon)
-    msg.attach(MIMEText(body, "plain"))
-    try:
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(GMAIL_ADDRESS, GMAIL_APP_PASS)
-            server.sendmail(GMAIL_ADDRESS, to_email, msg.as_string())
-        log.info(f"Key emailed (587) to {to_email} for {hunt_id}")
-        return True, None
-    except Exception as exc:
-        log.error(f"Failed to send email (587) to {to_email}: {exc}")
         return False, str(exc)
 
 
@@ -224,14 +206,10 @@ def test_email():
         key       = generate_key(hunts=[hunt], email=to, issued=date.today().isoformat())
         sent, err = send_key_email(to, title, hunt, key)
 
-        if not sent:
-            log.warning(f"Port 465 failed ({err}), trying port 587...")
-            sent, err = send_key_email_starttls(to, title, hunt, key)
-
         if sent:
             return f"<h2>Test email sent to {to}</h2><p>Key: <code>{key}</code></p>", 200
         else:
-            return f"<h2>Email FAILED on both ports</h2><p>{err}</p><p>GMAIL_ADDRESS set: {bool(GMAIL_ADDRESS)} | APP_PASS length: {len(GMAIL_APP_PASS)}</p>", 500
+            return f"<h2>Email FAILED</h2><p>{err}</p><p>RESEND_API_KEY set: {bool(RESEND_API_KEY)} | FROM: {FROM_EMAIL}</p>", 500
     except Exception:
         tb = traceback.format_exc()
         log.error(f"test_email crashed:\n{tb}")
@@ -240,14 +218,12 @@ def test_email():
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "email_configured": bool(GMAIL_ADDRESS and GMAIL_APP_PASS)}), 200
+    return jsonify({"status": "ok", "email_configured": bool(RESEND_API_KEY)}), 200
 
 
 if __name__ == "__main__":
-    if not GMAIL_ADDRESS:
-        log.warning("GMAIL_ADDRESS not set — edit .env before going live")
-    if not GMAIL_APP_PASS:
-        log.warning("GMAIL_APP_PASSWORD not set — edit .env before going live")
+    if not RESEND_API_KEY:
+        log.warning("RESEND_API_KEY not set — edit .env before going live")
 
     port = int(os.environ.get("PORT", 5051))
     host = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"

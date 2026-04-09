@@ -7,9 +7,9 @@ services:
     buildCommand: pip install -r requirements-webhook.txt
     startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT
     envVars:
-      - key: GMAIL_ADDRESS
-        sync: false        # set manually in Render dashboard — never stored in repo
-      - key: GMAIL_APP_PASSWORD
-        sync: false
+      - key: RESEND_API_KEY
+        sync: false        # set manually in Render dashboard
+      - key: FROM_EMAIL
+        sync: false        # e.g. onboarding@resend.dev or your verified domain
       - key: SHINY_HUNTER_SECRET
         sync: false
