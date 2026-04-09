@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: shiny-hunter-webhook
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: GMAIL_ADDRESS
+        sync: false        # set manually in Render dashboard — never stored in repo
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: SHINY_HUNTER_SECRET
+        sync: false
