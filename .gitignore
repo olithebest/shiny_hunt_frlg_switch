@@ -15,3 +15,14 @@ Thumbs.db
 *.log
 logs/
 config/settings_local.yaml
+
+# Encounter screenshots (runtime captures, not references)
+tools/screenshots/encounters/
+tools/screenshots/color_checks/
+tools/screenshots/sid_debug/
+
+# Training pair images (bulk encounter captures)
+data/training_pairs/
+
+# Backup / temp files
+*.bak

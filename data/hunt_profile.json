@@ -1,0 +1,24 @@
+{
+  "tid": 59556,
+  "sid": 43992,
+  "sid_candidates": [
+    43992,
+    43993,
+    43994,
+    43995,
+    43996,
+    43997,
+    43998,
+    43999
+  ],
+  "source_pokemon": "mewtwo",
+  "source_nature": "Impish",
+  "source_stats": {
+    "HP": 236,
+    "Atk": 163,
+    "Def": 161,
+    "SpA": 214,
+    "SpD": 149,
+    "Spe": 190
+  }
+}

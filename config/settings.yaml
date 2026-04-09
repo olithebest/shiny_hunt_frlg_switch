@@ -1,12 +1,13 @@
 capture:
-  device_index: 0      # Try 0, 1, 2 depending on how many cameras are connected
+  device_index: 3      # Device 3 = OBS Virtual Camera (OBS must be running with Switch scene active)
   width: 1280
   height: 720
   fps: 30
 
 controller:
-  mode: "keyboard"     # "keyboard" (test) or "serial" (Arduino)
-  serial_port: "COM3"  # Windows: COM3/COM4 | Linux: /dev/ttyUSB0
+  mode: "serial"       # "keyboard" (test) or "serial" (Arduino)
+  serial_port: "COM7"  # COM7 = sender Arduino (Uno/Nano) connected to PC
+                       # COM6 = Pro Micro (connected to Switch dock — NOT used by Python)
   baud_rate: 9600
 
 detection:

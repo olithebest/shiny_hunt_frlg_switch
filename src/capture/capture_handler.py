@@ -25,14 +25,14 @@ class CaptureHandler:
         self._cap: Optional[cv2.VideoCapture] = None
 
     def open(self):
-        self._cap = cv2.VideoCapture(self.device_index)
+        self._cap = cv2.VideoCapture(self.device_index, cv2.CAP_DSHOW)
         if not self._cap.isOpened():
             raise RuntimeError(
                 f"Could not open capture device at index {self.device_index}. "
                 f"Try a different device index (0, 1, 2...)."
             )
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        # Do NOT force a resolution — let the device use its native output.
+        # Forcing 1280x720 on a 640x480 virtual cam breaks frame reads.
 
     def grab_frame(self) -> Optional[np.ndarray]:
         """Grab a single BGR frame. Returns None if capture fails."""

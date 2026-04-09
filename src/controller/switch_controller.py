@@ -49,16 +49,16 @@ KEYBOARD_MAP = {
     Button.B:     "x",
     Button.X:     "a",
     Button.Y:     "s",
-    Button.PLUS:  Key.enter,
-    Button.MINUS: Key.backspace,
+    Button.PLUS:  "enter" if not PYNPUT_AVAILABLE else Key.enter,
+    Button.MINUS: "backspace" if not PYNPUT_AVAILABLE else Key.backspace,
     Button.L:     "q",
     Button.R:     "w",
     Button.ZL:    "e",
     Button.ZR:    "r",
-    Button.UP:    Key.up,
-    Button.DOWN:  Key.down,
-    Button.LEFT:  Key.left,
-    Button.RIGHT: Key.right,
+    Button.UP:    "up" if not PYNPUT_AVAILABLE else Key.up,
+    Button.DOWN:  "down" if not PYNPUT_AVAILABLE else Key.down,
+    Button.LEFT:  "left" if not PYNPUT_AVAILABLE else Key.left,
+    Button.RIGHT: "right" if not PYNPUT_AVAILABLE else Key.right,
 }
 
 
@@ -99,6 +99,7 @@ class SwitchController:
                 raise RuntimeError("pyserial not installed. Run: pip install pyserial")
             self._serial = serial.Serial(self.port, self.baud_rate, timeout=1)
             time.sleep(2)  # Give Arduino time to reset after serial connection
+            self._serial.reset_input_buffer()  # Discard garbage from Arduino DTR reset
             logger.info(f"Serial controller connected on {self.port}")
         elif self.mode == ControllerMode.KEYBOARD:
             if not PYNPUT_AVAILABLE:

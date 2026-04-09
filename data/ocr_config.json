@@ -1,0 +1,45 @@
+{
+    "_comment": "Calibrated OCR regions for FRLG NSO on Switch via OBS Virtual Camera (640x480). All coordinates are relative fractions (top, left, bottom, right) of the game area after black border removal (~508x452).",
+    "camera_device": 3,
+    "capture_resolution": [640, 480],
+    "game_area_approx": [508, 452],
+    "regions": {
+        "trainer_card_tid": [0.10, 0.73, 0.19, 0.86],
+        "stat_values": {
+            "hp":  [0.13, 0.90, 0.20, 0.99],
+            "atk": [0.25, 0.90, 0.31, 0.99],
+            "def": [0.33, 0.90, 0.39, 0.99],
+            "spa": [0.41, 0.90, 0.48, 0.99],
+            "spd": [0.49, 0.90, 0.56, 0.99],
+            "spe": [0.57, 0.90, 0.64, 0.99]
+        },
+        "stat_labels": {
+            "hp":  [0.13, 0.50, 0.20, 0.70],
+            "atk": [0.25, 0.50, 0.31, 0.78],
+            "def": [0.33, 0.50, 0.39, 0.78],
+            "spa": [0.41, 0.50, 0.48, 0.78],
+            "spd": [0.49, 0.50, 0.56, 0.78],
+            "spe": [0.57, 0.50, 0.64, 0.78]
+        }
+    },
+    "ocr_settings": {
+        "digit_template_size": [7, 9],
+        "upscale_target_height": 80,
+        "otsu_offset": 25,
+        "morph_close_kernel": 3,
+        "min_component_height_frac": 0.3,
+        "min_component_width_frac": 0.12,
+        "max_width_to_height_ratio": 1.5,
+        "min_confidence": 0.55
+    },
+    "band_scan_results": {
+        "_comment": "Dark pixel bands in right half of game area (y-ranges, 0-indexed). Found by test_stats_find.py.",
+        "hp_row":  [63, 88],
+        "atk_row": [114, 139],
+        "def_row": [150, 175],
+        "spa_row": [187, 212],
+        "spd_row": [223, 248],
+        "spe_row": [260, 284],
+        "exp_row": [296, 321]
+    }
+}
