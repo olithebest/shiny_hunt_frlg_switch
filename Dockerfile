@@ -16,9 +16,6 @@ RUN pip install --no-cache-dir -r requirements-webhook.txt
 
 COPY . .
 
-EXPOSE 8501
+EXPOSE 10000
 
-CMD ["streamlit", "run", "src/gui/app.py", \
-     "--server.address=0.0.0.0", \
-     "--server.headless=true", \
-     "--server.port=8501"]
+CMD ["sh", "-c", "gunicorn wsgi:app --bind 0.0.0.0:${PORT:-10000}"]
