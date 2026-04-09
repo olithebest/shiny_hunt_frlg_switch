@@ -191,17 +191,23 @@ def test_email():
     Quick test endpoint — hit this in your browser to verify email works.
     Usage: http://localhost:5051/test-email?to=your@email.com&hunt=mewtwo
     """
-    to    = request.args.get("to", GMAIL_ADDRESS)
-    hunt  = request.args.get("hunt", "mewtwo")
-    title = f"Shiny Hunter FRLG — {HUNT_CATALOGUE.get(hunt, {}).get('display', hunt)} Hunt"
+    import traceback
+    try:
+        to    = request.args.get("to", GMAIL_ADDRESS)
+        hunt  = request.args.get("hunt", "mewtwo")
+        title = f"Shiny Hunter FRLG — {HUNT_CATALOGUE.get(hunt, {}).get('display', hunt)} Hunt"
 
-    key  = generate_key(hunts=[hunt], email=to, issued=date.today().isoformat())
-    sent, err = send_key_email(to, title, hunt, key)
+        key  = generate_key(hunts=[hunt], email=to, issued=date.today().isoformat())
+        sent, err = send_key_email(to, title, hunt, key)
 
-    if sent:
-        return f"<h2>Test email sent to {to}</h2><p>Key: <code>{key}</code></p>", 200
-    else:
-        return f"<h2>Email FAILED</h2><p>{err}</p><p>GMAIL_ADDRESS set: {bool(GMAIL_ADDRESS)} | APP_PASS set: {bool(GMAIL_APP_PASS)} | Length: {len(GMAIL_APP_PASS)}</p>", 500
+        if sent:
+            return f"<h2>Test email sent to {to}</h2><p>Key: <code>{key}</code></p>", 200
+        else:
+            return f"<h2>Email FAILED</h2><p>{err}</p><p>GMAIL_ADDRESS set: {bool(GMAIL_ADDRESS)} | APP_PASS set: {bool(GMAIL_APP_PASS)} | Length: {len(GMAIL_APP_PASS)}</p>", 500
+    except Exception:
+        tb = traceback.format_exc()
+        log.error(f"test_email crashed:\n{tb}")
+        return f"<h2>Crash</h2><pre>{tb}</pre>", 500
 
 
 @app.route("/health", methods=["GET"])
