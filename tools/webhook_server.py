@@ -121,10 +121,10 @@ def send_key_email(to_email: str, product_title: str, hunt_id: str, key: str) ->
             server.login(GMAIL_ADDRESS, GMAIL_APP_PASS)
             server.sendmail(GMAIL_ADDRESS, to_email, msg.as_string())
         log.info(f"Key emailed to {to_email} for {hunt_id}")
-        return True
-    except smtplib.SMTPException as exc:
+        return True, None
+    except Exception as exc:
         log.error(f"Failed to send email to {to_email}: {exc}")
-        return False
+        return False, str(exc)
 
 
 @app.route("/webhook/itch", methods=["POST"])
@@ -175,13 +175,13 @@ def itch_webhook():
     log.info(f"Generated key for {buyer_email} / {hunt_id}: {key}")
 
     # Send the email
-    sent = send_key_email(buyer_email, product_title, hunt_id, key)
+    sent, err = send_key_email(buyer_email, product_title, hunt_id, key)
 
     if sent:
         return jsonify({"ok": True, "hunt": hunt_id, "email": buyer_email}), 200
     else:
         # Key was generated but email failed — log it so you can send manually
-        log.error(f"EMAIL FAILED — Manual key for {buyer_email}: {key}")
+        log.error(f"EMAIL FAILED — Manual key for {buyer_email}: {key} — Error: {err}")
         return jsonify({"ok": False, "error": "email failed", "key": key}), 500
 
 
@@ -196,12 +196,12 @@ def test_email():
     title = f"Shiny Hunter FRLG — {HUNT_CATALOGUE.get(hunt, {}).get('display', hunt)} Hunt"
 
     key  = generate_key(hunts=[hunt], email=to, issued=date.today().isoformat())
-    sent = send_key_email(to, title, hunt, key)
+    sent, err = send_key_email(to, title, hunt, key)
 
     if sent:
         return f"<h2>Test email sent to {to}</h2><p>Key: <code>{key}</code></p>", 200
     else:
-        return f"<h2>Email FAILED</h2><p>Check GMAIL_ADDRESS / GMAIL_APP_PASSWORD in your .env file</p>", 500
+        return f"<h2>Email FAILED</h2><p>{err}</p><p>GMAIL_ADDRESS set: {bool(GMAIL_ADDRESS)} | APP_PASS set: {bool(GMAIL_APP_PASS)} | Length: {len(GMAIL_APP_PASS)}</p>", 500
 
 
 @app.route("/health", methods=["GET"])
