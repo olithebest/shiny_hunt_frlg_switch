@@ -7,7 +7,9 @@ services:
     buildCommand: pip install -r requirements-webhook.txt
     startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT
     envVars:
-      - key: SENDGRID_API_KEY
+      - key: MAILJET_API_KEY
+        sync: false
+      - key: MAILJET_SECRET_KEY
         sync: false
       - key: FROM_EMAIL
         sync: false
