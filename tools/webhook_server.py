@@ -199,7 +199,7 @@ def test_email():
     """
     import traceback
     try:
-        to    = request.args.get("to", GMAIL_ADDRESS)
+        to    = request.args.get("to", FROM_EMAIL)
         hunt  = request.args.get("hunt", "mewtwo")
         title = f"Shiny Hunter FRLG — {HUNT_CATALOGUE.get(hunt, {}).get('display', hunt)} Hunt"
 
