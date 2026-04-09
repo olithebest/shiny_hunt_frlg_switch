@@ -46,9 +46,9 @@ from src.licensing.license_manager import generate_key, HUNT_CATALOGUE
 # ---------------------------------------------------------------------------
 # Config — all sensitive values come from environment variables / .env file
 # ---------------------------------------------------------------------------
-RESEND_API_KEY  = os.environ.get("RESEND_API_KEY", "")   # from resend.com — free, no SMTP needed
-FROM_EMAIL      = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")  # use resend.dev until you verify a domain
-WEBHOOK_SECRET = os.environ.get("ITCH_WEBHOOK_SECRET", "")  # optional: itch.io webhook secret for verification
+BREVO_API_KEY  = os.environ.get("BREVO_API_KEY", "")    # from brevo.com — free, 300 emails/day
+FROM_EMAIL     = os.environ.get("FROM_EMAIL", "")        # your verified sender email in Brevo
+WEBHOOK_SECRET = os.environ.get("ITCH_WEBHOOK_SECRET", "")
 
 # ---------------------------------------------------------------------------
 # Map your exact itch.io product TITLES to hunt IDs.
@@ -96,38 +96,39 @@ Happy hunting!
 
 
 def send_key_email(to_email: str, product_title: str, hunt_id: str, key: str):
-    """Send the license key via Resend HTTPS API (no SMTP — works on Render free tier)."""
-    if not RESEND_API_KEY:
-        return False, "RESEND_API_KEY not set"
+    """Send the license key via Brevo HTTPS API (no SMTP — works on Render free tier)."""
+    if not BREVO_API_KEY or not FROM_EMAIL:
+        return False, "BREVO_API_KEY or FROM_EMAIL not set"
 
     pokemon = HUNT_CATALOGUE.get(hunt_id, {}).get("display", hunt_id)
     body    = EMAIL_TEMPLATE.format(product_title=product_title, key=key, pokemon=pokemon)
 
     payload = json.dumps({
-        "from":    f"Shiny Hunter <{FROM_EMAIL}>",
-        "to":      [to_email],
-        "subject": f"Your license key for {product_title}",
-        "text":    body,
+        "sender":      {"name": "Shiny Hunter", "email": FROM_EMAIL},
+        "to":          [{"email": to_email}],
+        "subject":     f"Your license key for {product_title}",
+        "textContent": body,
     }).encode()
 
     req = urllib.request.Request(
-        "https://api.resend.com/emails",
+        "https://api.brevo.com/v3/smtp/email",
         data=payload,
         headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type":  "application/json",
+            "api-key":      BREVO_API_KEY,
+            "Content-Type": "application/json",
+            "Accept":       "application/json",
         },
         method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read())
-        log.info(f"Key emailed via Resend to {to_email} for {hunt_id}: {result}")
+        log.info(f"Key emailed via Brevo to {to_email} for {hunt_id}: {result}")
         return True, None
     except urllib.error.HTTPError as exc:
         body_err = exc.read().decode(errors="replace")
-        log.error(f"Resend API error {exc.code}: {body_err}")
-        return False, f"Resend {exc.code}: {body_err}"
+        log.error(f"Brevo API error {exc.code}: {body_err}")
+        return False, f"Brevo {exc.code}: {body_err}"
     except Exception as exc:
         log.error(f"Failed to send email to {to_email}: {exc}")
         return False, str(exc)
@@ -209,7 +210,7 @@ def test_email():
         if sent:
             return f"<h2>Test email sent to {to}</h2><p>Key: <code>{key}</code></p>", 200
         else:
-            return f"<h2>Email FAILED</h2><p>{err}</p><p>RESEND_API_KEY set: {bool(RESEND_API_KEY)} | FROM: {FROM_EMAIL}</p>", 500
+            return f"<h2>Email FAILED</h2><p>{err}</p><p>BREVO_API_KEY set: {bool(BREVO_API_KEY)} | FROM: {FROM_EMAIL}</p>", 500
     except Exception:
         tb = traceback.format_exc()
         log.error(f"test_email crashed:\n{tb}")
@@ -218,12 +219,14 @@ def test_email():
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "email_configured": bool(RESEND_API_KEY)}), 200
+    return jsonify({"status": "ok", "email_configured": bool(BREVO_API_KEY and FROM_EMAIL)}), 200
 
 
 if __name__ == "__main__":
-    if not RESEND_API_KEY:
-        log.warning("RESEND_API_KEY not set — edit .env before going live")
+    if not BREVO_API_KEY:
+        log.warning("BREVO_API_KEY not set — edit .env before going live")
+    if not FROM_EMAIL:
+        log.warning("FROM_EMAIL not set — edit .env before going live")
 
     port = int(os.environ.get("PORT", 5051))
     host = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"

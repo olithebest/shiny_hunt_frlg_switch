@@ -7,9 +7,9 @@ services:
     buildCommand: pip install -r requirements-webhook.txt
     startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT
     envVars:
-      - key: RESEND_API_KEY
+      - key: BREVO_API_KEY
         sync: false        # set manually in Render dashboard
       - key: FROM_EMAIL
-        sync: false        # e.g. onboarding@resend.dev or your verified domain
+        sync: false        # your verified sender email in Brevo
       - key: SHINY_HUNTER_SECRET
         sync: false
