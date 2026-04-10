@@ -51,6 +51,7 @@ MAILJET_API_KEY    = os.environ.get("MAILJET_API_KEY", "")     # from mailjet.co
 MAILJET_SECRET_KEY = os.environ.get("MAILJET_SECRET_KEY", "")  # from mailjet.com
 FROM_EMAIL         = os.environ.get("FROM_EMAIL", "")           # your verified sender email
 WEBHOOK_SECRET    = os.environ.get("ITCH_WEBHOOK_SECRET", "")
+ITCH_API_KEY       = os.environ.get("ITCH_API_KEY", "")         # itch.io API key for purchase polling
 
 # ---------------------------------------------------------------------------
 # Map your exact itch.io product TITLES to hunt IDs.
@@ -65,6 +66,88 @@ TITLE_TO_HUNT = {
     "Shiny Hunter FRLG — Articuno Hunt": "articuno",
     "Shiny Hunter FRLG — Deoxys Hunt":   "deoxys",
 }
+
+# ---------------------------------------------------------------------------
+# Map itch.io numeric game IDs to hunt IDs.
+# Run:  python tools/webhook_server.py --list-games  to see your game IDs.
+# ---------------------------------------------------------------------------
+GAME_ID_TO_HUNT = {
+    4462783: "mewtwo",   # Shiny Hunter FRLG — Mewtwo Hunt
+    # Add more as you publish new hunt pages:
+    # 9999999: "lugia",
+}
+
+# ---------------------------------------------------------------------------
+# Processed purchase tracking — persisted to data/processed_purchases.json
+# so we don't re-send emails after a server restart.
+# ---------------------------------------------------------------------------
+_PROCESSED_FILE = Path(__file__).resolve().parent.parent / "data" / "processed_purchases.json"
+_processed_ids: set = set()
+
+
+def _load_processed_ids():
+    global _processed_ids
+    try:
+        if _PROCESSED_FILE.exists():
+            _processed_ids = set(json.loads(_PROCESSED_FILE.read_text()))
+            log.info(f"Loaded {len(_processed_ids)} already-processed purchase IDs")
+    except Exception as exc:
+        log.warning(f"Could not load processed_purchases.json: {exc}")
+
+
+def _save_processed_ids():
+    try:
+        _PROCESSED_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _PROCESSED_FILE.write_text(json.dumps(sorted(_processed_ids)))
+    except Exception as exc:
+        log.warning(f"Could not save processed_purchases.json: {exc}")
+
+
+def poll_itch_purchases() -> list:
+    """Fetch purchases from the itch.io API and email keys for any new ones."""
+    if not ITCH_API_KEY:
+        log.warning("ITCH_API_KEY not set — skipping poll")
+        return [{"error": "ITCH_API_KEY not set"}]
+
+    results = []
+    for game_id, hunt_id in GAME_ID_TO_HUNT.items():
+        try:
+            url = f"https://itch.io/api/1/{ITCH_API_KEY}/game/{game_id}/purchases"
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+
+            purchases = data.get("purchases", [])
+            log.info(f"Poll: game {game_id} ({hunt_id}): {len(purchases)} total purchases")
+
+            for purchase in purchases:
+                pid = str(purchase.get("id", ""))
+                if not pid or pid in _processed_ids:
+                    continue  # already handled
+
+                email = purchase.get("email", "")
+                if not email or "@" not in email:
+                    log.warning(f"Purchase {pid} has no valid email — marking processed")
+                    _processed_ids.add(pid)
+                    continue
+
+                display   = HUNT_CATALOGUE.get(hunt_id, {}).get("display", hunt_id)
+                title     = f"Shiny Hunter FRLG \u2014 {display} Hunt"
+                key       = generate_key(hunts=[hunt_id], email=email, issued=date.today().isoformat())
+                sent, err = send_key_email(email, title, hunt_id, key)
+
+                _processed_ids.add(pid)
+                _save_processed_ids()
+
+                log.info(f"Poll processed purchase {pid}: {email}/{hunt_id} sent={sent} err={err}")
+                results.append({"pid": pid, "email": email, "hunt": hunt_id, "sent": sent, "err": err})
+
+        except Exception as exc:
+            log.error(f"Error polling game {game_id}: {exc}")
+            results.append({"game_id": game_id, "error": str(exc)})
+
+    return results
+
 
 # ---------------------------------------------------------------------------
 app = Flask(__name__)
@@ -221,9 +304,30 @@ def test_email():
         return f"<h2>Crash</h2><pre>{tb}</pre>", 500
 
 
+@app.route("/poll", methods=["GET", "POST"])
+def poll():
+    """
+    Called by a cron job every 5 minutes to check for new itch.io purchases.
+    Set up free at cron-job.org:
+      URL:      https://shiny-hunt-frlg-switch.onrender.com/poll
+      Interval: Every 5 minutes
+    """
+    results = poll_itch_purchases()
+    new_count = sum(1 for r in results if "pid" in r)
+    return jsonify({"ok": True, "new_purchases_processed": new_count, "details": results}), 200
+
+
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "email_configured": bool(MAILJET_API_KEY and MAILJET_SECRET_KEY and FROM_EMAIL)}), 200
+    return jsonify({
+        "status": "ok",
+        "email_configured": bool(MAILJET_API_KEY and MAILJET_SECRET_KEY and FROM_EMAIL),
+        "poll_configured":  bool(ITCH_API_KEY and GAME_ID_TO_HUNT),
+    }), 200
+
+
+# Load already-processed purchase IDs on startup so we never double-send
+_load_processed_ids()
 
 
 if __name__ == "__main__":

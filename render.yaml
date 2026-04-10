@@ -15,3 +15,5 @@ services:
         sync: false
       - key: SHINY_HUNTER_SECRET
         sync: false
+      - key: ITCH_API_KEY
+        sync: false
