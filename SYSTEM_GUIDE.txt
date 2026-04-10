@@ -1,0 +1,690 @@
+================================================================================
+  SHINY HUNTER FRLG — FULL SYSTEM GUIDE
+  Webhook Server, License Keys, Email Delivery & Render Deployment
+================================================================================
+
+Last updated: April 9, 2026
+
+--------------------------------------------------------------------------------
+TABLE OF CONTENTS
+--------------------------------------------------------------------------------
+  1.  Big Picture — What This System Does
+  2.  The Full Purchase Flow (step by step)
+  3.  Component 1 — itch.io (The Store)
+  4.  Component 2 — License Keys (src/licensing/license_manager.py)
+  5.  Component 3 — Webhook Server (tools/webhook_server.py)
+  6.  Component 4 — Email Delivery via Mailjet
+  7.  Component 5 — Render.com (Cloud Hosting)
+  8.  Component 6 — Store UI (tools/store_server.py)
+  9.  File Reference — Every File, What It Does, What It Talks To
+  10. Environment Variables — What Each One Means
+  11. How to Run Locally (for development and testing)
+  12. How to Deploy Changes to Render
+  13. Pending To-Do Items
+  14. Troubleshooting Reference
+  15. Email Provider History (Why Mailjet)
+
+================================================================================
+1. BIG PICTURE — WHAT THIS SYSTEM DOES
+================================================================================
+
+This project is a shiny Pokémon hunting automation tool for Fire Red / Leaf Green
+played on a Nintendo Switch via a homebrew bridge. The software automates
+encounters, detects shinies using image analysis, and stops when one is found.
+
+THE BUSINESS SIDE:
+  Each legendary Pokémon hunt (Mewtwo, Ho-Oh, Lugia, etc.) is sold separately
+  as a product on itch.io for $2.00. When someone buys a hunt:
+
+  1.  itch.io sends a "purchase notification" (called a webhook) to a URL you
+      configure — this URL is your server running on Render.com.
+  2.  The server receives the notification, generates a signed license key
+      for the specific hunt that was purchased.
+  3.  The server emails the license key to the buyer automatically.
+  4.  The buyer opens the store UI locally (store_server.py), pastes the key,
+      and the hunt is unlocked in the software.
+
+  NO MANUAL WORK IS NEEDED. The entire process from purchase to key delivery
+  is automated. Your PC doesn't even need to be on — Render handles it 24/7.
+
+
+================================================================================
+2. THE FULL PURCHASE FLOW (STEP BY STEP)
+================================================================================
+
+  [Buyer on itch.io]
+        |
+        |  Clicks "Buy" on "Shiny Hunter FRLG — Mewtwo Hunt"
+        |  Pays $2.00 via itch.io checkout
+        |
+        v
+  [itch.io servers]
+        |
+        |  Sends a POST request (an HTTP webhook) to:
+        |  https://shiny-hunt-frlg-switch.onrender.com/webhook/itch
+        |
+        |  The JSON payload looks like:
+        |  {
+        |    "purchase": { "email": "buyer@example.com", "price": 200 },
+        |    "game":     { "title": "Shiny Hunter FRLG — Mewtwo Hunt" }
+        |  }
+        |
+        v
+  [Render.com — Flask Server (tools/webhook_server.py)]
+        |
+        |  1. Extracts buyer's email and product title from the JSON
+        |  2. Looks up product title in TITLE_TO_HUNT dict → resolves to "mewtwo"
+        |  3. Calls generate_key(hunts=["mewtwo"], email="buyer@example.com", ...)
+        |
+        v
+  [src/licensing/license_manager.py — generate_key()]
+        |
+        |  Creates a JSON payload:
+        |    {"hunts": ["mewtwo"], "email": "buyer@example.com", "issued": "2026-04-09"}
+        |  Encodes it as Base32
+        |  Signs it with HMAC-SHA256 using SHINY_HUNTER_SECRET
+        |  Returns:  MEWTWO-BJLAB1CDEF23-ZXQRWVUT
+        |            ^hunt  ^12-char B32  ^8-char HMAC tag
+        |
+        v
+  [tools/webhook_server.py — send_key_email()]
+        |
+        |  POSTs to https://api.mailjet.com/v3.1/send
+        |  Using MAILJET_API_KEY + MAILJET_SECRET_KEY (Basic Auth)
+        |  Sends an email to buyer@example.com with the key and activation steps
+        |
+        v
+  [Buyer checks email]
+        |
+        |  Receives email with subject: "Your license key for Shiny Hunter FRLG — Mewtwo Hunt"
+        |  Email body contains the key and step-by-step activation instructions
+        |
+        v
+  [Buyer on their PC — tools/store_server.py]
+        |
+        |  Opens http://localhost:5050 in browser
+        |  Pastes the license key into the activation box
+        |  Clicks "Activate"
+        |
+        v
+  [src/licensing/license_manager.py — validate_key()]
+        |
+        |  Re-computes the HMAC signature from the key's payload
+        |  Compares it against the tag embedded in the key
+        |  If valid → writes the key to data/licenses.json
+        |  Hunt "mewtwo" is now unlocked and usable in the app
+        |
+        v
+  [Buyer runs start.bat → Mewtwo hunt begins]
+
+
+================================================================================
+3. COMPONENT 1 — itch.io (THE STORE)
+================================================================================
+
+  What it is:
+    itch.io is the storefront where buyers find and purchase the hunt software.
+    Each legendary Pokémon is its own separate itch.io product page.
+
+  Your itch.io account:
+    You have (or will create) one page per hunt, e.g.:
+      - "Shiny Hunter FRLG — Mewtwo Hunt"
+      - "Shiny Hunter FRLG — Ho-Oh Hunt"
+      etc.
+
+  The webhook setting:
+    On each product page: Edit page → Webhooks → Add webhook URL:
+      https://shiny-hunt-frlg-switch.onrender.com/webhook/itch
+
+    itch.io will POST to this URL every time someone completes a purchase.
+    The product TITLE in that POST must match exactly what is in TITLE_TO_HUNT
+    inside webhook_server.py.
+
+  IMPORTANT — Title must match exactly:
+    If your itch.io page title is "Shiny Hunter FRLG - Mewtwo Hunt" (dash, not
+    em-dash), the server will not find it in TITLE_TO_HUNT and will return a 400
+    error. Copy the title character-for-character from the itch.io dashboard and
+    put it in TITLE_TO_HUNT.
+
+  Related file:
+    tools/webhook_server.py  — TITLE_TO_HUNT dict at the top of the file
+
+
+================================================================================
+4. COMPONENT 2 — LICENSE KEYS (src/licensing/license_manager.py)
+================================================================================
+
+  What it is:
+    A self-contained cryptographic key system. Keys are human-readable strings
+    that carry signed data about which hunts are unlocked and who owns them.
+    They work fully OFFLINE — no internet call needed at activation time.
+
+  Key format:
+    MEWTWO-BJLABCDE1234-ZXQRWVUT
+      |       |              |
+     Hunt    12-char         8-char
+     code    Base32          HMAC tag
+             payload         (signature)
+
+  How it works:
+    Generation (server side, at purchase time):
+      1. Build a JSON blob: {"hunts":["mewtwo"],"email":"...","issued":"2026-04-09"}
+      2. Encode it as Base32 → the 12-char payload part
+      3. Compute HMAC-SHA256 over the payload using SHINY_HUNTER_SECRET
+      4. Take the first 8 chars of that HMAC as a Base32 tag
+      5. Combine: MEWTWO-{payload}-{tag}
+
+    Validation (buyer's PC, at activation time):
+      1. Split the key on "-" to get hunt_code, payload, tag
+      2. Re-compute the HMAC from the payload using the same SHINY_HUNTER_SECRET
+      3. If the computed tag matches the tag in the key → key is valid
+      4. Decode the payload to read which hunts are unlocked
+      5. Save the key to data/licenses.json
+
+    Security properties:
+      - Cannot be forged without SHINY_HUNTER_SECRET (kept only on Render)
+      - Cannot be tampered with (changing the payload changes the HMAC tag)
+      - Works offline after activation (no network call needed)
+      - One key can technically unlock multiple hunts (e.g., a bundle)
+
+  HUNT_CATALOGUE:
+    Also lives in license_manager.py. It maps hunt IDs to display names, prices,
+    and UI colors. Add new hunts here to make them available in the system:
+      "mewtwo":   {"display": "Mewtwo",   "price": "$2.00", "color": "#9B59B6"},
+      "lugia":    {"display": "Lugia",    "price": "$2.00", "color": "#5DADE2"},
+      ... (one entry per legendary)
+
+  Files touched:
+    src/licensing/license_manager.py   — the whole key system
+    data/licenses.json                 — where validated keys are stored locally
+    data/hunt_progress.json            — persists hunt unlock state
+
+
+================================================================================
+5. COMPONENT 3 — WEBHOOK SERVER (tools/webhook_server.py)
+================================================================================
+
+  What it is:
+    A Flask web server with three HTTP endpoints. It runs on Render.com 24/7.
+    Its only job is to listen for itch.io purchase notifications, generate keys,
+    and email them.
+
+  The three endpoints:
+
+    POST /webhook/itch
+      Called automatically by itch.io on every purchase.
+      Reads: buyer email + product title from JSON body
+      Does:  generate key → email buyer
+      Returns: 200 {"ok":true,"hunt":"mewtwo","email":"buyer@..."} on success
+               400 if payload is malformed
+               500 if email sending fails (key is still logged for manual recovery)
+
+    GET /test-email?to=EMAIL&hunt=HUNT
+      For developer testing only. Generates a real key and sends a real email.
+      Example: https://shiny-hunt-frlg-switch.onrender.com/test-email?to=you@gmail.com&hunt=mewtwo
+      Returns: HTML page confirming the email was sent and showing the key
+
+    GET /health
+      Returns: {"status":"ok","email_configured":true/false}
+      Used to verify the server is running and credentials are loaded.
+      Check this first if something seems wrong.
+
+  Key design decisions:
+    - Uses Python's built-in urllib (NOT the requests library) to call Mailjet.
+      This minimizes dependencies — no extra packages needed.
+    - If email fails, the server logs the key so you can manually send it.
+      The key is never lost, even if Mailjet is down.
+    - The server reads all secrets from environment variables (never hardcoded).
+    - TITLE_TO_HUNT mapping must be kept in sync with your itch.io page titles.
+
+  Files it imports from:
+    src/licensing/license_manager.py   — generate_key(), HUNT_CATALOGUE
+    .env (local only)                  — loaded via python-dotenv on startup
+
+
+================================================================================
+6. COMPONENT 4 — EMAIL DELIVERY VIA MAILJET
+================================================================================
+
+  What it is:
+    Mailjet is a third-party email sending service. The server uses Mailjet's
+    HTTPS API to send emails. This is necessary because Render.com's free tier
+    blocks all outbound SMTP connections (ports 465 and 587).
+
+  Why HTTPS API instead of SMTP:
+    SMTP (the traditional email protocol) uses TCP ports 465 or 587.
+    Render.com blocks these ports on free tier servers to prevent spam abuse.
+    Mailjet's HTTPS API uses port 443 (standard web traffic), which is allowed.
+    The server sends a POST request to https://api.mailjet.com/v3.1/send
+    with JSON, just like any other web API call.
+
+  Free tier limits:
+    - 200 emails per day (more than enough for a small indie project)
+    - No credit card required
+    - No custom domain required to start
+
+  Authentication:
+    Mailjet uses HTTP Basic Auth. The credentials are:
+      Username: MAILJET_API_KEY
+      Password: MAILJET_SECRET_KEY
+    These are base64-encoded and sent in the Authorization header.
+    Both values come from the Mailjet dashboard → Account Settings → API Keys.
+
+  The email that gets sent:
+    Subject: "Your license key for Shiny Hunter FRLG — Mewtwo Hunt"
+    Body includes:
+      - The license key (MEWTWO-XXXX-XXXX format)
+      - Step-by-step activation instructions:
+          1. Unzip and run setup.bat
+          2. Run: python tools/store_server.py
+          3. Open http://localhost:5050
+          4. Paste key → click Activate
+          5. Run start.bat
+
+  Spam folder warning:
+    Emails may land in the buyer's spam folder when sent from a personal email
+    address (like a Hotmail or Gmail address). This is normal behavior.
+    To fix it properly: verify a custom domain in Mailjet (optional, for later).
+
+  Related file:
+    tools/webhook_server.py   — send_key_email() function
+    .env / Render env vars    — MAILJET_API_KEY, MAILJET_SECRET_KEY, FROM_EMAIL
+
+
+================================================================================
+7. COMPONENT 5 — RENDER.COM (CLOUD HOSTING)
+================================================================================
+
+  What it is:
+    Render.com is a cloud platform that hosts the Flask webhook server.
+    It keeps the server running 24/7 so itch.io can reach it any time a purchase
+    is made — even when your PC is off.
+
+  How Render builds the server:
+    Render reads the Dockerfile in the project root.
+    The Dockerfile:
+      1. Starts from python:3.11-slim (a minimal Linux container)
+      2. Installs system dependencies (libgl1, etc.) needed by OpenCV
+      3. Copies requirements-webhook.txt into the container
+      4. Installs only the 4 packages in that file (flask, gunicorn, dotenv, PyYAML)
+         NOTE: It does NOT install the full requirements.txt — that would fail
+               because pynput and evdev cannot be built in a headless Docker container.
+      5. Copies the entire project folder into the container
+      6. Exposes port 10000
+      7. Runs: gunicorn wsgi:app --bind 0.0.0.0:${PORT:-10000}
+
+  Why gunicorn instead of just python:
+    Flask's built-in development server (app.run()) is not suitable for production.
+    Gunicorn is a production-grade WSGI server that:
+      - Handles multiple simultaneous requests
+      - Manages worker processes
+      - Is the standard way to run Flask in production
+
+  wsgi.py — the entry point:
+    Gunicorn does not launch webhook_server.py directly. It looks for a Python
+    module named "wsgi" and imports the Flask app from it. wsgi.py:
+      1. Adds the project root to sys.path (so src.licensing imports work)
+      2. Imports `app` from tools.webhook_server
+      3. Gunicorn uses that `app` object to serve HTTP requests
+
+  Cold starts:
+    Render's free tier spins down the server after 15 minutes of no traffic.
+    The first request after a spin-down takes ~30 seconds to respond (cold start).
+    itch.io may retry the webhook if the first attempt times out, so key delivery
+    should still work eventually.
+    OPTIONAL FIX: Set up a free ping at cron-job.org:
+      URL:       https://shiny-hunt-frlg-switch.onrender.com/health
+      Interval:  Every 10 minutes
+      This keeps the server warm and prevents cold starts.
+
+  How to deploy changes:
+    See Section 12 below.
+
+  Live server URL:
+    https://shiny-hunt-frlg-switch.onrender.com
+
+  Related files:
+    Dockerfile               — container build instructions
+    wsgi.py                  — gunicorn entry point
+    render.yaml              — Render service definition (optional, Render can also auto-detect)
+    Procfile                 — alternative start command (Heroku-style, also supported by Render)
+    requirements-webhook.txt — minimal dependency list for the container
+
+
+================================================================================
+8. COMPONENT 6 — STORE UI (tools/store_server.py)
+================================================================================
+
+  What it is:
+    A local web server the buyer runs on their own PC. It provides a browser-based
+    UI for activating license keys and browsing available hunts.
+
+  How the buyer uses it:
+    1. Run: python tools/store_server.py
+    2. Open: http://localhost:5050 in a browser
+    3. The page shows all available hunts (from HUNT_CATALOGUE)
+    4. Buyer pastes their license key into the activation box
+    5. Clicks "Activate"
+    6. store_server.py calls validate_key() from license_manager.py
+    7. If valid, the key is saved to data/licenses.json
+    8. The corresponding hunt(s) are now unlocked
+
+  This runs locally (on the buyer's PC), not on Render.
+  The store_server.py never contacts the internet — validation is 100% local.
+
+  Related files:
+    src/licensing/license_manager.py   — validate_key(), HUNT_CATALOGUE
+    data/licenses.json                 — where validated keys are saved
+
+
+================================================================================
+9. FILE REFERENCE — EVERY FILE, WHAT IT DOES, WHAT IT TALKS TO
+================================================================================
+
+  FILE                              PURPOSE
+  ─────────────────────────────────────────────────────────────────────────────
+  tools/webhook_server.py           The Flask server. Receives itch.io webhooks,
+                                    generates keys, emails buyers via Mailjet.
+                                    IMPORTS: src/licensing/license_manager.py
+                                    CALLS:   https://api.mailjet.com/v3.1/send
+                                    READS:   env vars (MAILJET_*, FROM_EMAIL,
+                                             SHINY_HUNTER_SECRET)
+
+  src/licensing/license_manager.py  The key cryptography engine.
+                                    generate_key() → creates signed key strings
+                                    validate_key() → verifies signature, saves key
+                                    HUNT_CATALOGUE → master list of all hunts
+                                    WRITES: data/licenses.json (on activation)
+                                    READS:  SHINY_HUNTER_SECRET env var
+
+  data/licenses.json                Local file storing all activated license keys.
+                                    Created/updated by license_manager.validate_key()
+                                    Read by the app to check which hunts are unlocked.
+
+  tools/store_server.py             Local Flask server for key activation UI.
+                                    Runs on buyer's PC at http://localhost:5050
+                                    IMPORTS: src/licensing/license_manager.py
+                                    READS/WRITES: data/licenses.json (via license_manager)
+
+  wsgi.py                           Gunicorn entry point for Render.
+                                    Imports `app` from tools/webhook_server.py.
+                                    MUST stay in project root. Do not rename.
+
+  Dockerfile                        Instructions for building the Docker container
+                                    that Render deploys. Installs system deps,
+                                    runs pip on requirements-webhook.txt, starts gunicorn.
+                                    USES: requirements-webhook.txt, wsgi.py
+
+  requirements-webhook.txt          Minimal Python dependencies for Render:
+                                      flask, python-dotenv, gunicorn, PyYAML
+                                    Does NOT include pynput, opencv, evdev
+                                    (those can't be built in headless Docker).
+
+  render.yaml                       Declarative Render.com service definition.
+                                    Declares env var names (values set in dashboard).
+                                    Render uses this if you connect via render.yaml
+                                    instead of auto-detection.
+
+  Procfile                          Alternative start command (Heroku-style).
+                                      web: gunicorn wsgi:app --bind 0.0.0.0:$PORT
+                                    Render can use this too. Both render.yaml and
+                                    Procfile point to wsgi.py.
+
+  .env                              Your LOCAL secrets file (NOT committed to git).
+                                    Used only when running webhook_server.py on your PC.
+                                    NEVER push this file to GitHub/Render.
+
+  .env.example                      Template showing which env vars are needed.
+                                    Safe to commit. No real values.
+                                    Users copy this to .env and fill it in.
+
+  tools/__init__.py                 Empty file. Makes tools/ a Python package.
+                                    Required so gunicorn can import tools.webhook_server.
+
+  data/hunt_profile.json            Your trainer data: TID=59556, SID=43992.
+                                    Used by the RNG module, not by the key system.
+
+  config/settings.yaml              General app settings (camera device, delays, etc.)
+                                    Used by the main automation scripts, not by
+                                    webhook_server or license_manager.
+
+  start.bat                         Launches the main shiny hunting app on Windows.
+  setup.bat                         Installs dependencies on Windows (pip install, etc.)
+
+  ─────────────────────────────────────────────────────────────────────────────
+
+
+================================================================================
+10. ENVIRONMENT VARIABLES — WHAT EACH ONE MEANS
+================================================================================
+
+  Variable name           Where set            What it does
+  ─────────────────────────────────────────────────────────────────────────────
+  MAILJET_API_KEY         Render dashboard     Public part of your Mailjet API
+                          and .env (local)     credential. Used as the Basic Auth
+                                               username when calling Mailjet's API.
+                                               Get it from: mailjet.com →
+                                               Account Settings → API Keys
+
+  MAILJET_SECRET_KEY      Render dashboard     Secret part of your Mailjet API
+                          and .env (local)     credential. Used as the Basic Auth
+                                               password. Same location as above.
+
+  FROM_EMAIL              Render dashboard     The "From:" address on emails sent
+                          and .env (local)     to buyers. Must be verified/added in
+                                               Mailjet (Account → Sender addresses).
+                                               Currently: olivierfragoso@hotmail.com
+
+  SHINY_HUNTER_SECRET     Render dashboard     The master signing secret for license
+                          and .env (local)     keys. HMAC-SHA256 uses this to sign
+                                               every key. If you change this, ALL
+                                               previously issued keys become invalid.
+                                               Keep this secret and never expose it.
+                                               Currently: shiny-hunter-frlg-secret-...
+
+  ITCH_WEBHOOK_SECRET     Render dashboard     Optional. itch.io can sign its webhook
+                          and .env (local)     payloads with an HMAC. If you set a
+                                               secret in the itch.io webhook settings,
+                                               put the same value here to verify
+                                               incoming requests are really from itch.io
+                                               (防止 spoofing). Currently unused/empty.
+
+  PORT                    Set by Render        The TCP port gunicorn listens on.
+                          automatically        Render sets this to 10000.
+                                               webhook_server.py also reads this in
+                                               its __main__ block for local runs.
+
+  ─────────────────────────────────────────────────────────────────────────────
+
+  HOW TO ADD/CHANGE A VALUE ON RENDER:
+    1. Go to https://dashboard.render.com
+    2. Click your "shiny-hunter-webhook" service
+    3. Go to "Environment" tab
+    4. Click "Add Environment Variable" or edit existing ones
+    5. Click "Save Changes" — Render will redeploy automatically
+
+
+================================================================================
+11. HOW TO RUN LOCALLY (FOR DEVELOPMENT AND TESTING)
+================================================================================
+
+  Prerequisites:
+    pip install flask python-dotenv
+
+  Step 1 — Copy .env.example to .env and fill in real values:
+    cp .env.example .env
+    (Edit .env with your actual Mailjet keys and email)
+
+  Step 2 — Start the server:
+    python tools/webhook_server.py
+    Server starts at: http://127.0.0.1:5051
+
+  Step 3 — Test email sending:
+    Open in browser:
+    http://localhost:5051/test-email?to=your@email.com&hunt=mewtwo
+
+  Step 4 — Test receiving a fake itch.io webhook (PowerShell):
+    Invoke-RestMethod -Method POST `
+      -Uri http://localhost:5051/webhook/itch `
+      -ContentType "application/json" `
+      -Body '{"purchase":{"email":"test@example.com"},"game":{"title":"Shiny Hunter FRLG — Mewtwo Hunt"}}'
+
+    Expected response:
+    {"email":"test@example.com","hunt":"mewtwo","ok":true}
+
+  Step 5 — To expose locally for real itch.io testing (optional):
+    Install ngrok, then run:
+      ngrok http 5051
+    Copy the https://xxxxx.ngrok.io URL and paste it into your itch.io webhook
+    settings as: https://xxxxx.ngrok.io/webhook/itch
+
+
+================================================================================
+12. HOW TO DEPLOY CHANGES TO RENDER
+================================================================================
+
+  Render.com is connected to your Git repository (or watches for Dockerfile changes).
+  The simplest deploy workflow:
+
+  Option A — Git push (if you connected Render to GitHub/GitLab):
+    git add .
+    git commit -m "describe your change"
+    git push
+
+    Render detects the push and automatically rebuilds the Docker container.
+    Build takes ~2-3 minutes. Watch the build logs at dashboard.render.com.
+
+  Option B — Manual deploy from Render dashboard:
+    1. Go to https://dashboard.render.com
+    2. Select your service
+    3. Click "Manual Deploy" → "Deploy latest commit"
+
+  How to check if a deploy worked:
+    After build succeeds, visit:
+      https://shiny-hunt-frlg-switch.onrender.com/health
+    Should return: {"status":"ok","email_configured":true}
+
+  If the build fails:
+    - Check the Logs tab in the Render dashboard
+    - Most common issues: a new import that isn't in requirements-webhook.txt,
+      or a syntax error in webhook_server.py
+
+
+================================================================================
+13. PENDING TO-DO ITEMS
+================================================================================
+
+  HIGH PRIORITY (do before going live):
+  ───────────────────────────────────────
+  [ ] Add webhook URL to each itch.io game page:
+        itch.io Dashboard → Edit page → Webhooks → Add:
+        https://shiny-hunt-frlg-switch.onrender.com/webhook/itch
+        Do this for every hunt product page.
+
+  [ ] Verify TITLE_TO_HUNT matches your exact itch.io page titles:
+        Open tools/webhook_server.py and check the TITLE_TO_HUNT dict.
+        Compare each entry character-for-character against the actual itch.io
+        page titles (watch out for em-dashes vs. regular dashes, extra spaces).
+
+  [ ] Test the full UI/activation flow:
+        a. Run: python tools/store_server.py
+        b. Open: http://localhost:5050
+        c. Paste a key from a test email into the activation field
+        d. Confirm the hunt unlocks
+        e. Run start.bat and test a full hunt cycle
+
+  OPTIONAL / POLISH:
+  ───────────────────
+  [ ] Keep-alive ping to prevent cold starts:
+        Sign up free at https://cron-job.org
+        Create a cron job: GET https://shiny-hunt-frlg-switch.onrender.com/health
+        Interval: Every 10 minutes
+        This prevents the 30-second cold start delay on the first purchase.
+
+  [ ] Fix spam delivery:
+        Emails currently land in spam because they come from a personal address.
+        To fix: verify a custom domain in Mailjet (Mailjet → Sender domains).
+        Then set FROM_EMAIL to noreply@yourdomain.com.
+
+  [ ] Add ITCH_WEBHOOK_SECRET validation:
+        In webhook_server.py's /webhook/itch route, validate the X-Itch-Signature
+        header against ITCH_WEBHOOK_SECRET to reject spoofed requests.
+
+
+================================================================================
+14. TROUBLESHOOTING REFERENCE
+================================================================================
+
+  SYMPTOM: /health returns {"email_configured": false}
+  CAUSE:   MAILJET_API_KEY, MAILJET_SECRET_KEY, or FROM_EMAIL is not set
+  FIX:     Check environment variables in Render dashboard → Environment tab
+
+  SYMPTOM: /webhook/itch returns 400 "unknown product"
+  CAUSE:   The itch.io product title doesn't match any entry in TITLE_TO_HUNT
+  FIX:     Copy the exact title from your itch.io dashboard and add/fix it in
+           the TITLE_TO_HUNT dict in tools/webhook_server.py, then redeploy
+
+  SYMPTOM: /webhook/itch returns 500 "email failed"
+  CAUSE:   Mailjet API call failed (wrong keys, account issue, etc.)
+  FIX:     Check Render logs for the detailed error message.
+           Also check Mailjet dashboard for API key status.
+           Note: the generated key is logged — you can send it manually.
+
+  SYMPTOM: Render build fails with "package not found"
+  CAUSE:   A new Python import in webhook_server.py isn't in requirements-webhook.txt
+  FIX:     Add the package to requirements-webhook.txt and redeploy
+
+  SYMPTOM: First webhook after inactivity is slow (~30 seconds)
+  CAUSE:   Render free tier cold start
+  FIX:     Set up keep-alive ping (see To-Do above)
+
+  SYMPTOM: Buyer says key doesn't activate
+  CAUSE:   Either the key is invalid (SHINY_HUNTER_SECRET mismatch) or the hunt
+           ID in the key doesn't match HUNT_CATALOGUE
+  FIX:     Verify that SHINY_HUNTER_SECRET in Render matches the local value.
+           Run validate_key() locally with the buyer's key to debug.
+
+  SYMPTOM: Email arrives in buyer's spam folder
+  CAUSE:   Personal sender address has no SPF/DKIM domain reputation
+  FIX:     Optional — verify custom domain in Mailjet (see To-Do above)
+
+
+================================================================================
+15. EMAIL PROVIDER HISTORY (WHY MAILJET)
+================================================================================
+
+  During development, several email providers were tried before finding one that
+  works on Render.com's free tier. Here is the history, in case you ever need
+  to switch providers again.
+
+  Provider      Result          Root cause of failure
+  ────────────────────────────────────────────────────────────────────────────
+  Gmail SMTP    FAILED          Render free tier blocks ALL outbound SMTP.
+                                Ports 465 and 587 are unreachable from Render.
+                                Error: "[Errno 101] Network is unreachable"
+
+  Resend        FAILED          Sandbox mode restriction: can only send to the
+                                account holder's own email address.
+                                Error: 403 error code 1010.
+                                (Would work if you upgrade to paid plan)
+
+  Brevo         FAILED          New accounts require manual SMTP activation review.
+                                Error: 403 "SMTP account not yet activated"
+
+  SendGrid      FAILED          Account rejected by compliance/vetting team.
+                                Account was flagged and disabled before any email
+                                was sent.
+
+  Mailjet       SUCCESS ✅      Free HTTPS API, 200 emails/day, no domain required,
+                                no manual review, works immediately on Render.
+                                Full end-to-end test confirmed working:
+                                  POST /webhook/itch → 200 OK → email delivered
+
+  LESSON LEARNED:
+    Render.com free tier blocks SMTP (ports 465/587). Any email provider that
+    requires SMTP will fail. Use only HTTPS-based email APIs (Mailjet, Resend,
+    Postmark, etc.).
+
+================================================================================
+END OF GUIDE
+================================================================================

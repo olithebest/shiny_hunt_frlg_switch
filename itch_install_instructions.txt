@@ -1,0 +1,84 @@
+What you need before starting:
+- Windows 10 or 11 PC
+- Nintendo Switch with FireRed/LeafGreen (via dock)
+- HDMI Capture Card (see hardware requirements on this page)
+- Two Arduinos: one ATmega32U4 Pro Micro (goes into the Switch), one Arduino UNO (goes into the PC)
+- 3 jumper wires to connect the two Arduinos
+- OBS Studio (free — obsproject.com)
+- Python 3.10 or newer (free — python.org — check "Add Python to PATH" during install)
+- Arduino IDE (free — arduino.cc/en/software)
+
+
+Step 1 — Extract the zip
+Unzip the downloaded file anywhere on your PC (e.g. C:\shiny-hunter\).
+
+
+Step 2 — Install Python dependencies
+Double-click setup.bat. It will install all required libraries automatically. Wait for it to finish.
+
+
+Step 3 — Flash the Arduino UNO (Serial Bridge)
+1. Open Arduino IDE
+2. Open arduino/serial_bridge/serial_bridge.ino
+3. Tools → Board → Arduino UNO
+4. Tools → Port → select the COM port for your UNO
+5. Click Upload
+
+
+Step 4 — Flash the Pro Micro (Switch Controller)
+1. In Arduino IDE, install the SparkFun board package:
+   - File → Preferences → paste this into "Additional Boards Manager URLs":
+     https://raw.githubusercontent.com/sparkfun/Arduino_Boards/main/IDE_Support/package_sparkfun_index.json
+   - Tools → Board → Boards Manager → search "SparkFun AVR" → Install
+2. Install the Switch control library:
+   - Sketch → Include Library → Manage Libraries → search "NintendoSwitchControlLibrary" → Install
+3. Open arduino/switch_controller/switch_controller.ino
+4. Tools → Board → SparkFun AVR → SparkFun Pro Micro
+5. Tools → Processor → ATmega32U4 (5V, 16MHz)
+6. Tools → Port → select the COM port for your Pro Micro
+7. Click Upload
+8. Unplug the Pro Micro from your PC
+
+
+Step 5 — Wire the two Arduinos together
+Connect 3 jumper wires:
+
+  UNO D11   →   Pro Micro pin 0 (RX1)
+  UNO D10   ←   Pro Micro pin 1 (TX1)
+  UNO GND   ↔   Pro Micro GND
+
+Keep the UNO plugged into your PC via USB. The Pro Micro gets power from the Switch.
+
+
+Step 6 — Connect the hardware
+1. Plug your Switch into its dock
+2. Connect: Switch dock HDMI OUT → Capture Card → PC (USB)
+3. Plug the Pro Micro into any USB port on the Switch dock
+4. The UNO stays connected to your PC via USB
+
+
+Step 7 — Set up OBS Virtual Camera
+1. Open OBS Studio
+2. Under Sources, click + → Video Capture Device
+3. Select your capture card from the device list
+4. Confirm your Switch screen appears in OBS
+5. Click "Start Virtual Camera" (bottom right in OBS)
+6. Leave OBS running in the background — do not close it
+
+
+Step 8 — Enter your license key
+1. Open a terminal in the shiny-hunter folder and run:
+   python tools/store_server.py
+2. A browser page will open — paste the license key you received after purchase
+3. Click Activate — your hunt will now be unlocked
+
+
+Step 9 — Start hunting
+Double-click start.bat. The app opens in your browser at http://localhost:8501
+Select your hunt, configure settings, and click Start.
+
+
+Troubleshooting
+- Arduino not detected: Try a different USB cable — many cheap cables are charge-only and carry no data
+- OBS camera not showing: Make sure the capture card is plugged into a USB 3.0 port (blue port)
+- Switch not responding to button presses: Check the 3 wires between the two Arduinos, especially the GND connection

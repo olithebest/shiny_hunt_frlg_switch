@@ -69,10 +69,10 @@ def activate():
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             result = _json.loads(resp.read())
     except Exception as e:
-        return jsonify({"ok": False, "message": f"Could not reach activation server. Check your internet connection.\n({e})"}), 200
+        return jsonify({"ok": False, "message": f"Could not reach activation server (the server may be waking up — wait 30 seconds and try again).\n({e})"}), 200
 
     if not result.get("ok"):
         return jsonify({"ok": False, "message": result.get("error", "Invalid or tampered license key.")}), 200

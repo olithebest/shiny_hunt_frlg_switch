@@ -26,3 +26,6 @@ data/training_pairs/
 
 # Backup / temp files
 *.bak
+
+# Per-user license store (generated at runtime, never commit)
+data/licenses.json
