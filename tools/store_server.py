@@ -21,11 +21,13 @@ import json as _json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from flask import Flask, send_file, request, jsonify
-from src.licensing.license_manager import store_server_validated, get_unlocked_hunts
+from src.licensing.license_manager import activate_key, store_server_validated, get_unlocked_hunts
 
-HTML_FILE   = os.path.join(os.path.dirname(__file__), "..", "src", "gui", "store.html")
-PORT        = 5050
-RENDER_URL  = "https://shiny-hunt-frlg-switch.onrender.com"
+HTML_FILE      = os.path.join(os.path.dirname(__file__), "..", "src", "gui", "store.html")
+PORT           = 5050
+RENDER_URL     = "https://shiny-hunt-frlg-switch.onrender.com"
+_DEFAULT_SEC   = "change-me-before-shipping-use-a-long-random-string-here"
+_HAS_LOCAL_KEY = os.environ.get("SHINY_HUNTER_SECRET", _DEFAULT_SEC) != _DEFAULT_SEC
 
 app = Flask(__name__)
 
@@ -46,7 +48,12 @@ def activate():
     if not key:
         return jsonify({"ok": False, "message": "No key provided."}), 400
 
-    # Validate via the Render server (secret lives there, not locally)
+    if _HAS_LOCAL_KEY:
+        # Developer machine: validate locally (fast, works offline)
+        ok, message, hunts = activate_key(key)
+        return jsonify({"ok": ok, "message": message, "hunts": hunts})
+
+    # Buyer machine: validate via Render server (secret lives there only)
     try:
         payload = _json.dumps({"key": key}).encode()
         req = urllib.request.Request(
