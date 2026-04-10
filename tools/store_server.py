@@ -20,6 +20,13 @@ import json as _json
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Load .env so SHINY_HUNTER_SECRET is available on the developer's machine
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+except ImportError:
+    pass
+
 from flask import Flask, send_file, request, jsonify
 from src.licensing.license_manager import activate_key, store_server_validated, get_unlocked_hunts
 
