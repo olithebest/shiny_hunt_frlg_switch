@@ -178,7 +178,7 @@ with st.sidebar:
         )
 
     st.divider()
-    st.caption("To unlock more hunts, run:  \n`python tools/store_server.py`")
+    st.caption("To unlock more hunts, run:  \n`python store_server.py`")
 
 # ---------------------------------------------------------------------------
 # UI — Main content
