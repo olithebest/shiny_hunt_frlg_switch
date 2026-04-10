@@ -18,19 +18,23 @@ import threading
 import urllib.request
 import json as _json
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+# Works whether store_server.py is in project root OR tools/ subfolder
+_ROOT = _HERE if os.path.isdir(os.path.join(_HERE, "src")) else os.path.dirname(_HERE)
+
+sys.path.insert(0, _ROOT)
 
 # Load .env so SHINY_HUNTER_SECRET is available on the developer's machine
 try:
     from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+    load_dotenv(os.path.join(_ROOT, ".env"))
 except ImportError:
     pass
 
 from flask import Flask, send_file, request, jsonify
 from src.licensing.license_manager import activate_key, store_server_validated, get_unlocked_hunts
 
-HTML_FILE      = os.path.join(os.path.dirname(__file__), "..", "src", "gui", "store.html")
+HTML_FILE      = os.path.join(_ROOT, "src", "gui", "store.html")
 PORT           = 5050
 RENDER_URL     = "https://shiny-hunt-frlg-switch.onrender.com"
 _DEFAULT_SEC   = "change-me-before-shipping-use-a-long-random-string-here"
