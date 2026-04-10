@@ -57,6 +57,7 @@ FREE_HUNTS: List[str] = []
 
 PROJECT_ROOT   = Path(__file__).resolve().parent.parent.parent
 LICENSE_FILE   = PROJECT_ROOT / "data" / "licenses.json"
+UNLOCKED_FILE  = PROJECT_ROOT / "data" / "unlocked.json"
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +193,22 @@ def activate_key(key: str) -> tuple[bool, str, List[str]]:
     return True, f"Activated! Unlocked: {', '.join(h.title() for h in hunts)}", hunts
 
 
+def store_server_validated(hunts: List[str]) -> None:
+    """
+    Persist hunts that were validated by the remote Render server.
+    Used when local HMAC cannot run because the secret is server-side only.
+    """
+    existing: List[str] = []
+    if UNLOCKED_FILE.exists():
+        try:
+            existing = json.loads(UNLOCKED_FILE.read_text())
+        except Exception:
+            pass
+    merged = sorted(set(existing) | {h.lower() for h in hunts})
+    UNLOCKED_FILE.parent.mkdir(parents=True, exist_ok=True)
+    UNLOCKED_FILE.write_text(json.dumps(merged, indent=2))
+
+
 def get_unlocked_hunts() -> List[str]:
     """
     Return the full list of hunt IDs unlocked by all stored keys.
@@ -202,6 +219,12 @@ def get_unlocked_hunts() -> List[str]:
         hunts = validate_key(key)
         if hunts:
             unlocked.update(hunts)
+    # Also include hunts verified by the remote server (no local HMAC needed)
+    if UNLOCKED_FILE.exists():
+        try:
+            unlocked.update(json.loads(UNLOCKED_FILE.read_text()))
+        except Exception:
+            pass
     return sorted(unlocked)
 
 

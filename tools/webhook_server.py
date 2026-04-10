@@ -279,6 +279,23 @@ def itch_webhook():
         return jsonify({"ok": False, "error": "email failed", "key": key}), 500
 
 
+@app.route("/validate-key", methods=["POST"])
+def validate_key_endpoint():
+    """
+    Called by the buyer's local store_server to validate a license key.
+    The HMAC secret lives only on this server — buyers never see it.
+    """
+    from src.licensing.license_manager import validate_key
+    data = request.get_json(silent=True) or {}
+    key = data.get("key", "").strip()
+    if not key:
+        return jsonify({"ok": False, "error": "No key provided"}), 400
+    hunts = validate_key(key)
+    if hunts is None:
+        return jsonify({"ok": False, "error": "Invalid or tampered license key."}), 200
+    return jsonify({"ok": True, "hunts": hunts}), 200
+
+
 @app.route("/test-email", methods=["GET"])
 def test_email():
     """
