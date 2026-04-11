@@ -626,9 +626,9 @@ class BDSPHuntConfig:
     # OpenCV HSV: H 0-180, S 0-255, V 0-255
     gold_h_lo:  int = 20   # yellow-gold hue lower bound (~40° real-world)
     gold_h_hi:  int = 38   # yellow-gold hue upper bound
-    gold_s_lo:  int = 160  # high saturation — filters pastel sky orange, keeps vivid shiny body
+    gold_s_lo:  int = 130  # catches shiny body (S≈140-180); sky orange has S<120 in narrow strip
     gold_v_lo:  int = 120  # minimum brightness
-    gold_pixel_threshold: int = 300  # min gold pixels in center body strip → shiny
+    gold_pixel_threshold: int = 2000  # sky in center strip scores ~1-5; shiny body scores ~30000+
     # Scan region as fraction of frame (keeps head+torso, excludes side rings & sky band)
     body_y_lo:  float = 0.05   # top of scan region (above head)
     body_y_hi:  float = 0.55   # bottom — cut above the lower orange sky gradient
