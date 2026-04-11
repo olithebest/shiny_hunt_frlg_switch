@@ -628,7 +628,7 @@ class BDSPHuntConfig:
     gold_h_hi:  int = 38   # yellow-gold hue upper bound
     gold_s_lo:  int = 120  # minimum saturation (filters out white body)
     gold_v_lo:  int = 120  # minimum brightness
-    gold_pixel_threshold: int = 120  # min gold pixels in center body strip → shiny
+    gold_pixel_threshold: int = 500  # min gold pixels in center body strip → shiny
     # Scan region as fraction of frame (keeps center body, excludes side rings)
     body_y_lo:  float = 0.05   # top of scan region
     body_y_hi:  float = 0.65   # bottom (above UI bar)
@@ -807,10 +807,7 @@ class BDSPHuntSequence:
             save_dir.mkdir(parents=True, exist_ok=True)
             label = f"enc{self.encounters:04d}_gold{max_gold}_{'SHINY' if is_shiny else 'normal'}"
 
-            # 1. Raw full frame
-            cv2.imwrite(str(save_dir / f"bdsp_{label}_raw.png"), best_frame)
-
-            # 2. Debug overlay: center strip box + gold pixels highlighted green
+            # Debug overlay: center strip box + gold pixels highlighted green
             h, w = best_frame.shape[:2]
             ry1, ry2 = int(cfg.body_y_lo * h), int(cfg.body_y_hi * h)
             rx1, rx2 = int(cfg.body_x_lo * w), int(cfg.body_x_hi * w)
