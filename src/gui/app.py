@@ -91,7 +91,6 @@ def add_log(msg: str):
     """Thread-safe log: safe to call from any thread."""
     ts = datetime.now().strftime("%H:%M:%S")
     _log_queue.put(f"[{ts}] {msg}")
-    logging.info(msg)
 
 
 def run_hunt_thread(capture_idx: int, hunt_id: str, ctrl_mode: str, serial_port: str):

@@ -609,7 +609,7 @@ class BDSPHuntConfig:
     x_wait:              float = 0.7   # after X press, before A (confirm)
     close_wait:          float = 2.0   # after A (confirm close), game shuts down
     open_wait:           float = 1.0   # between A (open game) and A (select profile)
-    game_boot_wait:      float = 10.0  # BDSP boot time after profile select
+    game_boot_wait:      float = 13.0  # BDSP boot time after profile select
     skip_cinematic_wait: float = 2.5   # after skipping cinematic
     save_load_wait:      float = 6.0   # after pressing A on title screen, save loads
 
