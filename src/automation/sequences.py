@@ -616,8 +616,8 @@ class BDSPHuntConfig:
 
     # -- Encounter timings --
     cutscene_wait:       float = 13.0  # approach animation + Arceus appearing + cry
-    battle_start_wait:   float = 6.0   # after pressing A to enter battle
-    capture_duration:    float = 1.5   # seconds of frames to sample for color check
+    battle_start_wait:   float = 3.0   # after pressing A to enter battle
+    capture_duration:    float = 3.0   # seconds of frames to sample for color check
 
     # -- Detection --
     # Shiny Arceus has a distinctive golden/yellow body (high saturation yellow).
@@ -744,16 +744,24 @@ class BDSPHuntSequence:
         self.state.transition(AutomationState.WAITING_FOR_BATTLE)
         time.sleep(cfg.battle_start_wait)
 
-        # Capture a short window of frames for color analysis
+        # Capture a window of frames for color analysis, saving each one for calibration
         self.state.transition(AutomationState.CHECKING_FOR_SHINY)
         self._log("Capturing frames to check for golden Arceus...")
         frames: List[np.ndarray] = []
-        end_time = time.time() + cfg.capture_duration
-        while time.time() < end_time and not self._stop_event.is_set():
+        save_dir = Path(__file__).resolve().parent.parent.parent / "tools" / "screenshots" / "detection_tests"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        t_start = time.time()
+        frame_idx = 0
+        while (time.time() - t_start) < cfg.capture_duration and not self._stop_event.is_set():
             frame = self.capture.grab_frame()
             if frame is not None:
                 frames.append(frame)
+                offset_ms = int((time.time() - t_start) * 1000)
+                fname = save_dir / f"bdsp_enc{self.encounters+1:04d}_frame{frame_idx:02d}_T{offset_ms:04d}ms.png"
+                cv2.imwrite(str(fname), frame)
+                frame_idx += 1
             time.sleep(0.1)
+        self._log(f"Saved {frame_idx} raw frames to {save_dir.name}/ for calibration")
         return frames
 
     # ------------------------------------------------------------------
