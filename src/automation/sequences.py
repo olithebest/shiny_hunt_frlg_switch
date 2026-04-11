@@ -3,6 +3,7 @@ import random
 import logging
 import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional, Callable, List, Tuple
 
 import cv2
@@ -791,6 +792,36 @@ class BDSPHuntSequence:
             f"Gold pixels: {max_gold} (threshold: {cfg.gold_pixel_threshold}) "
             f"→ {'🌟 SHINY' if is_shiny else 'not shiny'}"
         )
+
+        # Save debug images so you can inspect what the bot analysed
+        if best_frame is not None:
+            save_dir = Path(__file__).resolve().parent.parent.parent / "tools" / "screenshots" / "detection_tests"
+            save_dir.mkdir(parents=True, exist_ok=True)
+            label = f"enc{self.encounters:04d}_gold{max_gold}_{'SHINY' if is_shiny else 'normal'}"
+
+            # 1. Raw full frame
+            raw_path = save_dir / f"bdsp_{label}_raw.png"
+            cv2.imwrite(str(raw_path), best_frame)
+
+            # 2. Debug overlay: draw the analysed region + highlight gold pixels in bright green
+            h, w = best_frame.shape[:2]
+            debug = best_frame.copy()
+            ry1, ry2 = int(0.05 * h), int(0.65 * h)
+            rx1, rx2 = int(0.08 * w), int(0.92 * w)
+            region = best_frame[ry1:ry2, rx1:rx2]
+            hsv_dbg = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
+            lo = np.array([cfg.gold_h_lo, cfg.gold_s_lo, cfg.gold_v_lo], dtype=np.uint8)
+            hi = np.array([cfg.gold_h_hi, 255, 255], dtype=np.uint8)
+            mask_dbg = cv2.inRange(hsv_dbg, lo, hi)
+            debug[ry1:ry2, rx1:rx2][mask_dbg > 0] = (0, 255, 0)   # green = gold pixels
+            cv2.rectangle(debug, (rx1, ry1), (rx2, ry2), (0, 200, 255), 2)  # orange box
+            cv2.putText(debug, f"gold={max_gold} thr={cfg.gold_pixel_threshold}",
+                        (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            dbg_path = save_dir / f"bdsp_{label}_debug.png"
+            cv2.imwrite(str(dbg_path), debug)
+
+            self._log(f"Saved detection images → {save_dir.name}/bdsp_{label}_*.png")
+
         return is_shiny, best_frame
 
     # ------------------------------------------------------------------
