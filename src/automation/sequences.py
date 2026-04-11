@@ -611,7 +611,7 @@ class BDSPHuntConfig:
     open_wait:           float = 1.0   # between A (open game) and A (select profile)
     game_boot_wait:      float = 13.0  # BDSP boot time after profile select
     skip_cinematic_wait: float = 2.5   # after skipping cinematic
-    save_load_wait:      float = 6.0   # after pressing A on title screen, save loads
+    save_load_wait:      float = 10.0  # after pressing A on title screen, save loads
 
     # -- Encounter timings --
     cutscene_wait:       float = 13.0  # approach animation + Arceus appearing + cry
