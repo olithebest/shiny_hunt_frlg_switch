@@ -621,13 +621,19 @@ class BDSPHuntConfig:
 
     # -- Detection --
     # Shiny Arceus has a distinctive golden/yellow body (high saturation yellow).
-    # Normal Arceus is white/off-white (very low saturation).
+    # Normal Arceus is white/off-white with yellow ring on the SIDES only.
+    # We scan only the CENTER body strip to exclude the side rings.
     # OpenCV HSV: H 0-180, S 0-255, V 0-255
     gold_h_lo:  int = 20   # yellow-gold hue lower bound (~40° real-world)
     gold_h_hi:  int = 38   # yellow-gold hue upper bound
-    gold_s_lo:  int = 120  # minimum saturation (filters out white Arceus)
+    gold_s_lo:  int = 120  # minimum saturation (filters out white body)
     gold_v_lo:  int = 120  # minimum brightness
-    gold_pixel_threshold: int = 300  # min gold pixels to declare shiny
+    gold_pixel_threshold: int = 120  # min gold pixels in center body strip → shiny
+    # Scan region as fraction of frame (keeps center body, excludes side rings)
+    body_y_lo:  float = 0.05   # top of scan region
+    body_y_hi:  float = 0.65   # bottom (above UI bar)
+    body_x_lo:  float = 0.28   # left edge — cuts out left ring
+    body_x_hi:  float = 0.72   # right edge — cuts out right ring
 
 
 # BDSP hunts that use BDSPHuntSequence instead of HuntSequence
@@ -744,24 +750,16 @@ class BDSPHuntSequence:
         self.state.transition(AutomationState.WAITING_FOR_BATTLE)
         time.sleep(cfg.battle_start_wait)
 
-        # Capture a window of frames for color analysis, saving each one for calibration
+        # Capture a short window of frames for color analysis
         self.state.transition(AutomationState.CHECKING_FOR_SHINY)
         self._log("Capturing frames to check for golden Arceus...")
         frames: List[np.ndarray] = []
-        save_dir = Path(__file__).resolve().parent.parent.parent / "tools" / "screenshots" / "detection_tests"
-        save_dir.mkdir(parents=True, exist_ok=True)
         t_start = time.time()
-        frame_idx = 0
         while (time.time() - t_start) < cfg.capture_duration and not self._stop_event.is_set():
             frame = self.capture.grab_frame()
             if frame is not None:
                 frames.append(frame)
-                offset_ms = int((time.time() - t_start) * 1000)
-                fname = save_dir / f"bdsp_enc{self.encounters+1:04d}_frame{frame_idx:02d}_T{offset_ms:04d}ms.png"
-                cv2.imwrite(str(fname), frame)
-                frame_idx += 1
             time.sleep(0.1)
-        self._log(f"Saved {frame_idx} raw frames to {save_dir.name}/ for calibration")
         return frames
 
     # ------------------------------------------------------------------
@@ -771,10 +769,11 @@ class BDSPHuntSequence:
     def _check_shiny(self, frames: List[np.ndarray]) -> Tuple[bool, Optional[np.ndarray]]:
         """
         Shiny Arceus (BDSP) has a vivid golden-yellow body.
-        Normal Arceus is white/off-white (saturation ≈ 0).
+        Normal Arceus is white/off-white — BUT has a yellow wheel/ring on its SIDES.
 
-        Strategy: count pixels in HSV yellow-gold range in the top portion
-        of the frame (where Arceus appears during battle, above the UI bar).
+        Strategy: scan only the CENTER body strip (x: 28%–72%) so the side rings
+        are excluded. The head/neck/torso area is distinctly golden on shiny and
+        white on normal, giving a reliable pixel count difference.
         Returns (is_shiny, best_frame).
         """
         cfg = self.config
@@ -786,10 +785,11 @@ class BDSPHuntSequence:
 
         for frame in frames:
             h, w = frame.shape[:2]
-            # Check top 65% of frame, ignore edges (narrow strips)
-            region = frame[int(0.05 * h):int(0.65 * h), int(0.08 * w):int(0.92 * w)]
-            hsv  = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
-            mask = cv2.inRange(hsv, lo, hi)
+            ry1, ry2 = int(cfg.body_y_lo * h), int(cfg.body_y_hi * h)
+            rx1, rx2 = int(cfg.body_x_lo * w), int(cfg.body_x_hi * w)
+            region = frame[ry1:ry2, rx1:rx2]  # center body strip only
+            hsv   = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
+            mask  = cv2.inRange(hsv, lo, hi)
             count = int(cv2.countNonZero(mask))
             if count > max_gold:
                 max_gold = count
@@ -797,7 +797,7 @@ class BDSPHuntSequence:
 
         is_shiny = max_gold >= cfg.gold_pixel_threshold
         self._log(
-            f"Gold pixels: {max_gold} (threshold: {cfg.gold_pixel_threshold}) "
+            f"Gold pixels in body strip: {max_gold} (threshold: {cfg.gold_pixel_threshold}) "
             f"→ {'🌟 SHINY' if is_shiny else 'not shiny'}"
         )
 
@@ -808,25 +808,21 @@ class BDSPHuntSequence:
             label = f"enc{self.encounters:04d}_gold{max_gold}_{'SHINY' if is_shiny else 'normal'}"
 
             # 1. Raw full frame
-            raw_path = save_dir / f"bdsp_{label}_raw.png"
-            cv2.imwrite(str(raw_path), best_frame)
+            cv2.imwrite(str(save_dir / f"bdsp_{label}_raw.png"), best_frame)
 
-            # 2. Debug overlay: draw the analysed region + highlight gold pixels in bright green
+            # 2. Debug overlay: center strip box + gold pixels highlighted green
             h, w = best_frame.shape[:2]
-            debug = best_frame.copy()
-            ry1, ry2 = int(0.05 * h), int(0.65 * h)
-            rx1, rx2 = int(0.08 * w), int(0.92 * w)
+            ry1, ry2 = int(cfg.body_y_lo * h), int(cfg.body_y_hi * h)
+            rx1, rx2 = int(cfg.body_x_lo * w), int(cfg.body_x_hi * w)
+            debug  = best_frame.copy()
             region = best_frame[ry1:ry2, rx1:rx2]
-            hsv_dbg = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
-            lo = np.array([cfg.gold_h_lo, cfg.gold_s_lo, cfg.gold_v_lo], dtype=np.uint8)
-            hi = np.array([cfg.gold_h_hi, 255, 255], dtype=np.uint8)
+            hsv_dbg  = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
             mask_dbg = cv2.inRange(hsv_dbg, lo, hi)
-            debug[ry1:ry2, rx1:rx2][mask_dbg > 0] = (0, 255, 0)   # green = gold pixels
+            debug[ry1:ry2, rx1:rx2][mask_dbg > 0] = (0, 255, 0)   # green = matched gold
             cv2.rectangle(debug, (rx1, ry1), (rx2, ry2), (0, 200, 255), 2)  # orange box
-            cv2.putText(debug, f"gold={max_gold} thr={cfg.gold_pixel_threshold}",
-                        (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-            dbg_path = save_dir / f"bdsp_{label}_debug.png"
-            cv2.imwrite(str(dbg_path), debug)
+            cv2.putText(debug, f"gold={max_gold} thr={cfg.gold_pixel_threshold} CENTER BODY ONLY",
+                        (8, h - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
+            cv2.imwrite(str(save_dir / f"bdsp_{label}_debug.png"), debug)
 
             self._log(f"Saved detection images → {save_dir.name}/bdsp_{label}_*.png")
 
