@@ -43,13 +43,14 @@ MASTER_SECRET   = os.environ.get("SHINY_HUNTER_SECRET", _DEFAULT_SECRET).encode(
 # Add new entries here as you build new hunt sequences.
 # ---------------------------------------------------------------------------
 HUNT_CATALOGUE = {
-    "mewtwo":   {"display": "Mewtwo",   "price": "$2.50", "color": "#9B59B6"},
-    "lugia":    {"display": "Lugia",    "price": "$2.50", "color": "#5DADE2"},
-    "ho-oh":    {"display": "Ho-Oh",    "price": "$2.50", "color": "#E67E22"},
-    "zapdos":   {"display": "Zapdos",   "price": "$2.50", "color": "#F1C40F"},
-    "moltres":  {"display": "Moltres",  "price": "$2.50", "color": "#E74C3C"},
-    "articuno": {"display": "Articuno", "price": "$2.50", "color": "#85C1E9"},
-    "deoxys":   {"display": "Deoxys",   "price": "$2.50", "color": "#27AE60"},
+    "mewtwo":   {"display": "Mewtwo",          "price": "$2.50", "color": "#9B59B6"},
+    "lugia":    {"display": "Lugia",           "price": "$2.50", "color": "#5DADE2"},
+    "ho-oh":    {"display": "Ho-Oh",           "price": "$2.50", "color": "#E67E22"},
+    "zapdos":   {"display": "Zapdos",          "price": "$2.50", "color": "#F1C40F"},
+    "moltres":  {"display": "Moltres",         "price": "$2.50", "color": "#E74C3C"},
+    "articuno": {"display": "Articuno",        "price": "$2.50", "color": "#85C1E9"},
+    "deoxys":   {"display": "Deoxys",          "price": "$2.50", "color": "#27AE60"},
+    "arceus":   {"display": "Arceus (BDSP)",   "price": "$2.50", "color": "#F0C030"},
 }
 
 # Hunt included free so users can see the app is working before buying.

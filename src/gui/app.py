@@ -23,7 +23,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.capture.capture_handler import CaptureHandler
 from src.detection.shiny_detector import ShinyDetector
 from src.controller.switch_controller import SwitchController, ControllerMode
-from src.automation.sequences import HuntSequence
+from src.automation.sequences import HuntSequence, BDSPHuntSequence, BDSP_TARGETS
 from src.licensing.license_manager import HUNT_CATALOGUE, get_unlocked_hunts
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -123,7 +123,7 @@ def _on_encounter(count: int, is_shiny: bool):
 # ---------------------------------------------------------------------------
 # UI — Header
 # ---------------------------------------------------------------------------
-st.title("✨ Shiny Hunter — Pokémon Fire Red / Leaf Green")
+st.title("✨ Shiny Hunter — FRLG & BDSP")
 st.caption("Automated shiny hunting via capture card + Nintendo Switch controller emulation")
 
 unlocked_hunts = get_unlocked_hunts()
@@ -508,7 +508,7 @@ else:
     # -----------------------------------------------------------------------
     # UI — Header
     # -----------------------------------------------------------------------
-    st.title("✨ Shiny Hunter — Pokémon Fire Red / Leaf Green")
+    st.title("✨ Shiny Hunter — FRLG & BDSP")
     st.caption("Automated shiny hunting via capture card + Nintendo Switch controller emulation")
 
     unlocked_hunts = get_unlocked_hunts()

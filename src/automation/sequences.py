@@ -3,8 +3,9 @@ import random
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Optional, Callable, List
+from typing import Optional, Callable, List, Tuple
 
+import cv2
 import numpy as np
 
 from ..capture.capture_handler import CaptureHandler
@@ -570,5 +571,266 @@ class RNGHuntSequence:
 
         self._log(f"RNG sweep complete — {total} attempts, no shiny found.")
         self._log("Try adjusting --base-offset in find_shiny_frame.py or increasing --spread.")
+        self.state.transition(AutomationState.STOPPED)
+        return HuntResult(is_shiny=False, encounters=self.encounters)
+
+
+# ---------------------------------------------------------------------------
+# BDSP — Arceus at Spear Pillar
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BDSPHuntConfig:
+    """
+    Timing configuration for the BDSP Arceus hunt.
+    All values are in seconds unless noted.
+
+    Reset sequence (called after a non-shiny encounter, and once at startup):
+      1. Press HOME  →  Switch home screen appears
+      2. Press X     →  "Close software?" popup appears
+      3. Press A     →  Game closes
+      4. Press A     →  BDSP selected (last-played game is auto-highlighted)
+      5. Press A     →  Profile selected (or skipped if remembered)
+      6. Wait game_boot_wait  →  BDSP finishes loading
+      7. Press A     →  Skip opening cinematic (Dialga/Palkia flying sequence)
+      8. Wait skip_cinematic_wait
+      9. Press A     →  "Press A Button" title screen → save loads
+      10. Wait save_load_wait  →  Player appears at top of Spear Pillar stairs
+
+    Encounter sequence:
+      1. Press UP (walk toward Arceus, holds 0.5s)  →  approach cutscene begins
+      2. Wait cutscene_wait  →  Arceus turns around and cries
+      3. Press A  →  enter battle
+      4. Wait battle_start_wait  →  battle fully rendered
+      5. Capture frames, check for gold/yellow body color
+    """
+    # -- Reset timings --
+    home_wait:           float = 1.8   # after HOME press, before X
+    x_wait:              float = 0.7   # after X press, before A (confirm)
+    close_wait:          float = 2.0   # after A (confirm close), game shuts down
+    open_wait:           float = 1.0   # between A (open game) and A (select profile)
+    game_boot_wait:      float = 10.0  # BDSP boot time after profile select
+    skip_cinematic_wait: float = 2.5   # after skipping cinematic
+    save_load_wait:      float = 6.0   # after pressing A on title screen, save loads
+
+    # -- Encounter timings --
+    cutscene_wait:       float = 13.0  # approach animation + Arceus appearing + cry
+    battle_start_wait:   float = 6.0   # after pressing A to enter battle
+    capture_duration:    float = 1.5   # seconds of frames to sample for color check
+
+    # -- Detection --
+    # Shiny Arceus has a distinctive golden/yellow body (high saturation yellow).
+    # Normal Arceus is white/off-white (very low saturation).
+    # OpenCV HSV: H 0-180, S 0-255, V 0-255
+    gold_h_lo:  int = 20   # yellow-gold hue lower bound (~40° real-world)
+    gold_h_hi:  int = 38   # yellow-gold hue upper bound
+    gold_s_lo:  int = 120  # minimum saturation (filters out white Arceus)
+    gold_v_lo:  int = 120  # minimum brightness
+    gold_pixel_threshold: int = 300  # min gold pixels to declare shiny
+
+
+# BDSP hunts that use BDSPHuntSequence instead of HuntSequence
+BDSP_TARGETS: set = {"arceus"}
+
+
+class BDSPHuntSequence:
+    """
+    Shiny hunt for Arceus in Pokémon Brilliant Diamond / Shining Pearl.
+
+    Unlike FRLG, BDSP has no in-game soft reset.  The reset loop is:
+        HOME → X (close popup) → A (confirm) → A (reopen) → A (profile)
+        → wait boot → A (skip cinematic) → A (title press) → wait load
+        → back at Spear Pillar save point
+
+    PRE-CONDITION:
+        Save the game at the top of the Spear Pillar stairs, facing Arceus,
+        while the game is running.  The bot's first action is to close and
+        reopen the game to reload from that save.
+
+    Detection:
+        Shiny Arceus has a vivid golden/yellow body vs. white for normal.
+        We count yellow-gold HSV pixels in the top 60% of the battle frame.
+        If count >= gold_pixel_threshold → SHINY.
+    """
+
+    def __init__(
+        self,
+        target: str,
+        controller: SwitchController,
+        capture: CaptureHandler,
+        on_status:   Optional[Callable[[str], None]]       = None,
+        on_encounter: Optional[Callable[[int, bool], None]] = None,
+        on_progress:  Optional[Callable[[str, int], None]]  = None,
+        start_encounters: int = 0,
+        config: Optional[BDSPHuntConfig] = None,
+    ):
+        self.target       = target.lower()
+        self.controller   = controller
+        self.capture      = capture
+        self.on_status    = on_status    or (lambda msg: logger.info(msg))
+        self.on_encounter = on_encounter or (lambda count, shiny: None)
+        self.on_progress  = on_progress  or (lambda target, count: None)
+        self.config       = config or BDSPHuntConfig()
+        self.encounters   = start_encounters
+        self.state        = StateMachine(AutomationState.IDLE)
+        self._stop_event  = threading.Event()
+
+    # ------------------------------------------------------------------
+    def stop(self):
+        self._stop_event.set()
+
+    def _log(self, msg: str):
+        logger.info(msg)
+        self.on_status(msg)
+
+    # ------------------------------------------------------------------
+    # Reset: close game via Home menu and reopen from last save
+    # ------------------------------------------------------------------
+
+    def _close_and_reopen(self):
+        """HOME → close game → reopen → load save at Spear Pillar."""
+        cfg = self.config
+
+        self._log("Pressing HOME to return to home screen...")
+        self.state.transition(AutomationState.SOFT_RESETTING)
+        self.controller.press(Button.HOME, hold_time=0.15, wait_after=cfg.home_wait)
+
+        self._log("Pressing X to open close-game popup...")
+        self.controller.press(Button.X, hold_time=0.15, wait_after=cfg.x_wait)
+
+        self._log("Pressing A to confirm close...")
+        self.controller.press(Button.A, hold_time=0.15, wait_after=cfg.close_wait)
+
+        # Home screen — BDSP is the last-played game and auto-highlighted
+        self._log("Pressing A to select BDSP...")
+        self.controller.press(Button.A, hold_time=0.15, wait_after=cfg.open_wait)
+
+        self._log("Pressing A to select profile...")
+        self.controller.press(Button.A, hold_time=0.15, wait_after=0.5)
+
+        self._log(f"Waiting {cfg.game_boot_wait}s for BDSP to boot...")
+        self.state.transition(AutomationState.WAITING_FOR_RESET)
+        time.sleep(cfg.game_boot_wait)
+
+        self._log("Pressing A to skip opening cinematic...")
+        self.controller.press(Button.A, hold_time=0.15, wait_after=cfg.skip_cinematic_wait)
+
+        self._log("Pressing A on title screen to load save...")
+        self.state.transition(AutomationState.WAITING_FOR_TITLE)
+        self.controller.press(Button.A, hold_time=0.15, wait_after=cfg.save_load_wait)
+
+        self._log("Save loaded — standing at top of Spear Pillar stairs.")
+
+    # ------------------------------------------------------------------
+    # Encounter: walk UP, wait for cutscene + cry, enter battle
+    # ------------------------------------------------------------------
+
+    def _approach_and_enter_battle(self) -> List[np.ndarray]:
+        """Walk toward Arceus, wait for cutscene+cry, press A, capture frames."""
+        cfg = self.config
+
+        self._log("Walking toward Arceus (holding UP)...")
+        self.state.transition(AutomationState.NAVIGATING_TO_TARGET)
+        self.controller.press(Button.UP, hold_time=0.5, wait_after=0.2)
+
+        self._log(f"Waiting {cfg.cutscene_wait}s for approach cutscene + Arceus cry...")
+        time.sleep(cfg.cutscene_wait)
+
+        self._log("Pressing A to enter battle after cry...")
+        self.controller.press(Button.A, hold_time=0.15, wait_after=0.3)
+
+        self._log(f"Waiting {cfg.battle_start_wait}s for battle to fully start...")
+        self.state.transition(AutomationState.WAITING_FOR_BATTLE)
+        time.sleep(cfg.battle_start_wait)
+
+        # Capture a short window of frames for color analysis
+        self.state.transition(AutomationState.CHECKING_FOR_SHINY)
+        self._log("Capturing frames to check for golden Arceus...")
+        frames: List[np.ndarray] = []
+        end_time = time.time() + cfg.capture_duration
+        while time.time() < end_time and not self._stop_event.is_set():
+            frame = self.capture.grab_frame()
+            if frame is not None:
+                frames.append(frame)
+            time.sleep(0.1)
+        return frames
+
+    # ------------------------------------------------------------------
+    # Detection: golden pixel count
+    # ------------------------------------------------------------------
+
+    def _check_shiny(self, frames: List[np.ndarray]) -> Tuple[bool, Optional[np.ndarray]]:
+        """
+        Shiny Arceus (BDSP) has a vivid golden-yellow body.
+        Normal Arceus is white/off-white (saturation ≈ 0).
+
+        Strategy: count pixels in HSV yellow-gold range in the top portion
+        of the frame (where Arceus appears during battle, above the UI bar).
+        Returns (is_shiny, best_frame).
+        """
+        cfg = self.config
+        lo = np.array([cfg.gold_h_lo, cfg.gold_s_lo, cfg.gold_v_lo], dtype=np.uint8)
+        hi = np.array([cfg.gold_h_hi, 255, 255], dtype=np.uint8)
+
+        best_frame: Optional[np.ndarray] = None
+        max_gold = 0
+
+        for frame in frames:
+            h, w = frame.shape[:2]
+            # Check top 65% of frame, ignore edges (narrow strips)
+            region = frame[int(0.05 * h):int(0.65 * h), int(0.08 * w):int(0.92 * w)]
+            hsv  = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
+            mask = cv2.inRange(hsv, lo, hi)
+            count = int(cv2.countNonZero(mask))
+            if count > max_gold:
+                max_gold = count
+                best_frame = frame.copy()
+
+        is_shiny = max_gold >= cfg.gold_pixel_threshold
+        self._log(
+            f"Gold pixels: {max_gold} (threshold: {cfg.gold_pixel_threshold}) "
+            f"→ {'🌟 SHINY' if is_shiny else 'not shiny'}"
+        )
+        return is_shiny, best_frame
+
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
+    def run_cycle(self) -> HuntResult:
+        """One encounter cycle: walk → battle → detect → (if not shiny) close+reopen."""
+        if self._stop_event.is_set():
+            return HuntResult(is_shiny=False, encounters=self.encounters)
+
+        frames = self._approach_and_enter_battle()
+        is_shiny, best_frame = self._check_shiny(frames)
+        self.encounters += 1
+        self.on_encounter(self.encounters, is_shiny)
+        self.on_progress(self.target, self.encounters)
+
+        if is_shiny:
+            self._log(f"🌟 SHINY ARCEUS found after {self.encounters} encounters!")
+            self.state.transition(AutomationState.SHINY_FOUND)
+            return HuntResult(is_shiny=True, encounters=self.encounters, frame=best_frame)
+
+        self._log(f"#{self.encounters}: Not shiny. Closing game to reload save...")
+        self._close_and_reopen()
+        return HuntResult(is_shiny=False, encounters=self.encounters, frame=best_frame)
+
+    def run(self) -> HuntResult:
+        """Run the full hunt loop until a shiny is found or stop() is called."""
+        self._stop_event.clear()
+        self._log("Starting BDSP Arceus shiny hunt! Good luck!")
+        self._log("PRE-CONDITION: Game is running. Save is at top of Spear Pillar, facing Arceus.")
+
+        # Always reload from save first for a clean starting state
+        self._close_and_reopen()
+
+        while not self._stop_event.is_set():
+            result = self.run_cycle()
+            if result.is_shiny or self._stop_event.is_set():
+                self.state.transition(AutomationState.STOPPED)
+                return result
+
         self.state.transition(AutomationState.STOPPED)
         return HuntResult(is_shiny=False, encounters=self.encounters)
