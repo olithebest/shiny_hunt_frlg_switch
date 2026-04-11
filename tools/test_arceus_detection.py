@@ -43,24 +43,21 @@ from src.automation.sequences import BDSPHuntConfig
 # ---------------------------------------------------------------------------
 CFG = BDSPHuntConfig()
 
-GOLD_LO = np.array([CFG.gold_h_lo, CFG.gold_s_lo, CFG.gold_v_lo], dtype=np.uint8)
-GOLD_HI = np.array([CFG.gold_h_hi, 255,            255           ], dtype=np.uint8)
+# All values come directly from BDSPHuntConfig — guaranteed to stay in sync with live detection
+GOLD_LO   = np.array([CFG.gold_h_lo, CFG.gold_s_lo, CFG.gold_v_lo], dtype=np.uint8)
+GOLD_HI   = np.array([CFG.gold_h_hi, 255,            255           ], dtype=np.uint8)
 THRESHOLD = CFG.gold_pixel_threshold
-
-# Detection region (fraction of frame height/width)
-# Must match BDSPHuntSequence._check_shiny()
-ROI_Y0 = 0.05
-ROI_Y1 = 0.65
-ROI_X0 = 0.08
-ROI_X1 = 0.92
 
 # ---------------------------------------------------------------------------
 
 def analyze_frame(frame: np.ndarray) -> dict:
     """Run the exact same detection logic as BDSPHuntSequence._check_shiny()."""
     h, w = frame.shape[:2]
-    y0, y1 = int(ROI_Y0 * h), int(ROI_Y1 * h)
-    x0, x1 = int(ROI_X0 * w), int(ROI_X1 * w)
+    # Read region bounds from config — always in sync with the live hunt
+    y0 = int(CFG.body_y_lo * h)
+    y1 = int(CFG.body_y_hi * h)
+    x0 = int(CFG.body_x_lo * w)
+    x1 = int(CFG.body_x_hi * w)
     region = frame[y0:y1, x0:x1]
 
     hsv  = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
